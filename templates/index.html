@@ -169,7 +169,7 @@
               </span>
             </div>
             <div class="mt-4 flex items-baseline gap-2">
-              <span class="text-4xl font-extrabold tracking-tight" x-text="telemetry.motorcycles_detected">72</span>
+              <span class="text-4xl font-extrabold tracking-tight" x-text="currentCamData.motorcycles_detected">72</span>
               <span class="text-xs text-slate-400 font-medium">units tracked</span>
             </div>
           </div>
@@ -183,45 +183,85 @@
               </span>
             </div>
             <div class="mt-4 flex items-baseline gap-2">
-              <span class="text-4xl font-extrabold tracking-tight text-blue-600" x-text="telemetry.capacity_left">28</span>
+              <span class="text-4xl font-extrabold tracking-tight text-blue-600" x-text="currentCamData.capacity_left">28</span>
               <span class="text-xs text-slate-400 font-medium">bays remaining</span>
             </div>
           </div>
 
-          <!-- Card 3: Occupancy Rate -->
+          <!-- Card 3: Occupancy Rate (With Interactive Threshold Simulation) -->
           <div class="bg-white text-slate-900 rounded-xl p-6 shadow-sm border border-slate-100 flex flex-col justify-between">
             <div class="flex items-center justify-between">
               <span class="text-xs font-bold uppercase tracking-wider text-slate-500">Occupancy</span>
-              <span class="text-xs font-semibold text-slate-400">Threshold: 85%</span>
+              <div class="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+                <span>Alert at:</span>
+                <input type="range" min="50" max="95" step="5" x-model="threshold" class="w-16 h-1 bg-slate-200 accent-blue-600 rounded-lg cursor-pointer">
+                <span class="font-mono text-slate-700" x-text="threshold + '%'">85%</span>
+              </div>
             </div>
             <div class="mt-3">
               <div class="flex items-baseline justify-between mb-2">
-                <span class="text-4xl font-extrabold tracking-tight" x-text="telemetry.occupancy_pct + '%'">72%</span>
-                <span class="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">Optimal Level</span>
+                <span class="text-4xl font-extrabold tracking-tight" x-text="currentCamData.occupancy_pct + '%'">72%</span>
+                <template x-if="currentCamData.occupancy_pct >= threshold">
+                  <span class="text-xs font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded border border-red-200 animate-pulse flex items-center gap-1">
+                    <span class="w-1.5 h-1.5 rounded-full bg-red-500"></span> Cap Alert (> <span x-text="threshold + '%'"></span>)
+                  </span>
+                </template>
+                <template x-if="currentCamData.occupancy_pct < threshold">
+                  <span class="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100 flex items-center gap-1">
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Optimal Level
+                  </span>
+                </template>
               </div>
               <!-- Progress Bar -->
               <div class="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-                <div class="bg-blue-600 h-2 rounded-full transition-all duration-500" :style="'width: ' + telemetry.occupancy_pct + '%'"></div>
+                <div 
+                  class="h-2 rounded-full transition-all duration-500" 
+                  :class="currentCamData.occupancy_pct >= threshold ? 'bg-red-500' : 'bg-blue-600'"
+                  :style="'width: ' + currentCamData.occupancy_pct + '%'"></div>
               </div>
             </div>
           </div>
 
         </div>
 
-        <!-- Camera Player Card (CAM-01 South Yard) -->
+        <!-- Camera Player Card (Dynamic CAM-01 / CAM-02 Switcher) -->
         <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden text-slate-900">
           
           <!-- Card Header & Toggles -->
           <div class="p-5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
             <div class="flex items-center gap-3">
-              <span class="font-bold text-base text-slate-900">CAM-01 (South Yard)</span>
-              <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
-                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Live 1080p 30 FPS
+              <!-- Camera Switcher Dropdown/Pills -->
+              <div class="flex items-center bg-slate-100 p-1 rounded-lg">
+                <button 
+                  @click="selectCam('cam_01')" 
+                  :class="activeCam === 'cam_01' ? 'bg-white shadow text-slate-900 font-bold' : 'text-slate-500 hover:text-slate-800'"
+                  class="px-3 py-1 rounded text-xs transition">
+                  CAM-01 (South Yard)
+                </button>
+                <button 
+                  @click="selectCam('cam_02')" 
+                  :class="activeCam === 'cam_02' ? 'bg-white shadow text-slate-900 font-bold' : 'text-slate-500 hover:text-slate-800'"
+                  class="px-3 py-1 rounded text-xs transition">
+                  CAM-02 (Perimeter Gate)
+                </button>
+              </div>
+
+              <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> 
+                <span x-text="'Live 1080p ' + currentCamData.fps + ' FPS'">Live 1080p 30 FPS</span>
               </span>
             </div>
 
-            <!-- View Toggles & Confidence -->
-            <div class="flex items-center gap-4">
+            <!-- View Toggles, Confidence, Snapshot -->
+            <div class="flex items-center gap-3">
+              <!-- Snapshot Button -->
+              <button 
+                @click="takeSnapshot()" 
+                class="px-3 py-1.5 rounded-md bg-slate-100 hover:bg-slate-200 text-xs font-medium text-slate-700 transition flex items-center gap-1.5">
+                <i data-lucide="camera" class="w-3.5 h-3.5"></i>
+                Snapshot
+              </button>
+
               <!-- Mode Switcher -->
               <div class="bg-slate-100 p-1 rounded-lg flex items-center text-xs font-medium">
                 <button 
@@ -240,7 +280,7 @@
 
               <!-- Metrics Readout -->
               <div class="text-xs font-mono text-slate-500 bg-slate-50 px-3 py-1.5 rounded-md border border-slate-200">
-                CONF: <span class="text-slate-800 font-semibold">98.4%</span> | CV LATENCY: <span class="text-slate-800 font-semibold" x-text="telemetry.latency_ms + 'ms'">21ms</span>
+                CONF: <span class="text-slate-800 font-semibold" x-text="currentCamData.confidence + '%'">98.4%</span> | CV LATENCY: <span class="text-slate-800 font-semibold" x-text="currentCamData.latency_ms + 'ms'">21ms</span>
               </div>
             </div>
           </div>
@@ -323,17 +363,19 @@
 
           <!-- Quick Stats & Refresh -->
           <div class="flex items-center gap-4">
-            <div class="bg-slate-900 border border-slate-800 px-4 py-2 rounded-lg text-right">
-              <div class="text-[10px] font-mono text-slate-400 uppercase">Fleet Occupancy</div>
-              <div class="text-lg font-bold text-white font-mono">72.0%</div>
+            <div class="bg-slate-900 border border-slate-800 px-4 py-2 rounded-lg text-right transition">
+              <div class="text-[10px] font-mono text-slate-400 uppercase">Sector Occupancy</div>
+              <div class="text-lg font-bold text-white font-mono" x-text="sectorStats.occupancy">72.0%</div>
             </div>
-            <div class="bg-slate-900 border border-slate-800 px-4 py-2 rounded-lg text-right">
+            <div class="bg-slate-900 border border-slate-800 px-4 py-2 rounded-lg text-right transition">
               <div class="text-[10px] font-mono text-slate-400 uppercase">Est. Surplus</div>
-              <div class="text-lg font-bold text-blue-400 font-mono">+28 Moto</div>
+              <div class="text-lg font-bold text-blue-400 font-mono" x-text="sectorStats.surplus">+28 Moto</div>
             </div>
-            <button class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-2 transition shadow-md shadow-blue-600/30">
-              <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
-              Refresh Mesh
+            <button 
+              @click="refreshMesh()" 
+              class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-2 transition shadow-md shadow-blue-600/30">
+              <i data-lucide="refresh-cw" :class="isRefreshing ? 'animate-spin' : ''" class="w-3.5 h-3.5"></i>
+              <span x-text="isRefreshing ? 'Scanning Mesh...' : 'Refresh Mesh'">Refresh Mesh</span>
             </button>
           </div>
         </div>
@@ -342,25 +384,25 @@
         <div class="flex items-center gap-2">
           <button 
             @click="selectedSector = 'all'"
-            :class="selectedSector === 'all' ? 'bg-slate-800 text-white border-blue-500' : 'bg-slate-900 text-slate-400 border-slate-800'"
+            :class="selectedSector === 'all' ? 'bg-blue-600 text-white border-blue-500 shadow-md shadow-blue-600/20' : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'"
             class="px-4 py-1.5 rounded-full text-xs font-medium border transition">
             All Sectors
           </button>
           <button 
             @click="selectedSector = 'zone_a'"
-            :class="selectedSector === 'zone_a' ? 'bg-slate-800 text-white border-blue-500' : 'bg-slate-900 text-slate-400 border-slate-800'"
+            :class="selectedSector === 'zone_a' ? 'bg-blue-600 text-white border-blue-500 shadow-md shadow-blue-600/20' : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'"
             class="px-4 py-1.5 rounded-full text-xs font-medium border transition">
             Zone A • East Yard
           </button>
           <button 
             @click="selectedSector = 'zone_b'"
-            :class="selectedSector === 'zone_b' ? 'bg-slate-800 text-white border-blue-500' : 'bg-slate-900 text-slate-400 border-slate-800'"
+            :class="selectedSector === 'zone_b' ? 'bg-blue-600 text-white border-blue-500 shadow-md shadow-blue-600/20' : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'"
             class="px-4 py-1.5 rounded-full text-xs font-medium border transition">
             Zone B • Central Lot
           </button>
           <button 
             @click="selectedSector = 'zone_c'"
-            :class="selectedSector === 'zone_c' ? 'bg-slate-800 text-white border-blue-500' : 'bg-slate-900 text-slate-400 border-slate-800'"
+            :class="selectedSector === 'zone_c' ? 'bg-blue-600 text-white border-blue-500 shadow-md shadow-blue-600/20' : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'"
             class="px-4 py-1.5 rounded-full text-xs font-medium border transition">
             Zone C • West Wing
           </button>
@@ -390,12 +432,18 @@
           <div class="relative bg-slate-950 aspect-[21/9] w-full flex items-center justify-center overflow-hidden">
             <img 
               src="/outputs/preview_video2.jpg" 
-              class="w-full h-full object-cover opacity-90" 
+              class="w-full h-full object-cover opacity-90 transition duration-300"
+              :class="selectedSector !== 'all' ? 'scale-[1.02]' : ''" 
               alt="Orthomosaic Spatial Map">
             
+            <!-- Orthomosaic Active Zone Highlight Badge -->
+            <div class="absolute top-4 right-4 bg-slate-900/90 backdrop-blur border border-blue-500/50 rounded px-3 py-1.5 text-xs font-mono text-white flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
+              <span>FILTERED SECTOR:</span>
+              <span class="text-blue-400 font-bold uppercase" x-text="selectedSector.replace('_', ' ')">ALL</span>
+            </div>
+
             <!-- Orthomosaic Overlay Tags -->
-            <div class="absolute inset-0 bg-blue-950/20 pointer-events-none"></div>
-            
             <div class="absolute bottom-4 left-4 flex items-center gap-4 bg-slate-900/90 backdrop-blur px-3 py-1.5 rounded border border-slate-800 text-xs font-mono">
               <div class="flex items-center gap-2">
                 <span class="w-2.5 h-2.5 rounded-sm bg-emerald-500"></span>
@@ -413,10 +461,13 @@
           </div>
         </div>
 
-        <!-- 4 Zone Breakdown Cards -->
+        <!-- 4 Zone Breakdown Cards (Interactive Selection) -->
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <!-- Card 1: Facility Total -->
-          <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
+          <div 
+            @click="selectedSector = 'all'"
+            :class="selectedSector === 'all' ? 'ring-2 ring-blue-500 bg-slate-800/90 shadow-lg shadow-blue-500/10' : 'bg-slate-900 hover:bg-slate-850'"
+            class="border border-slate-800 rounded-xl p-5 space-y-3 cursor-pointer transition">
             <div class="flex items-center justify-between text-xs">
               <span class="font-bold text-slate-400 uppercase tracking-wider">Facility Total</span>
               <span class="bg-slate-800 text-slate-300 px-2 py-0.5 rounded text-[10px] font-mono">3 Sectors</span>
@@ -438,7 +489,10 @@
           </div>
 
           <!-- Card 2: Zone A -->
-          <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
+          <div 
+            @click="selectedSector = 'zone_a'"
+            :class="selectedSector === 'zone_a' ? 'ring-2 ring-blue-500 bg-slate-800/90 shadow-lg shadow-blue-500/10' : 'bg-slate-900 hover:bg-slate-850'"
+            class="border border-slate-800 rounded-xl p-5 space-y-3 cursor-pointer transition">
             <div class="flex items-center justify-between text-xs">
               <span class="font-bold text-slate-400 uppercase tracking-wider">Zone A • East Yard</span>
               <span class="text-[10px] text-slate-500 font-mono">1,920 m²</span>
@@ -460,7 +514,10 @@
           </div>
 
           <!-- Card 3: Zone B -->
-          <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
+          <div 
+            @click="selectedSector = 'zone_b'"
+            :class="selectedSector === 'zone_b' ? 'ring-2 ring-amber-500 bg-slate-800/90 shadow-lg shadow-amber-500/10' : 'bg-slate-900 hover:bg-slate-850'"
+            class="border border-slate-800 rounded-xl p-5 space-y-3 cursor-pointer transition">
             <div class="flex items-center justify-between text-xs">
               <span class="font-bold text-slate-400 uppercase tracking-wider">Zone B • Central Lot</span>
               <span class="text-[10px] text-slate-500 font-mono">1,540 m²</span>
@@ -482,7 +539,10 @@
           </div>
 
           <!-- Card 4: Zone C -->
-          <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
+          <div 
+            @click="selectedSector = 'zone_c'"
+            :class="selectedSector === 'zone_c' ? 'ring-2 ring-emerald-500 bg-slate-800/90 shadow-lg shadow-emerald-500/10' : 'bg-slate-900 hover:bg-slate-850'"
+            class="border border-slate-800 rounded-xl p-5 space-y-3 cursor-pointer transition">
             <div class="flex items-center justify-between text-xs">
               <span class="font-bold text-slate-400 uppercase tracking-wider">Zone C • West Wing</span>
               <span class="text-[10px] text-slate-500 font-mono">1,380 m²</span>
@@ -627,6 +687,8 @@
         overlayActive: true,
         activeCam: 'cam_01',
         selectedSector: 'all',
+        threshold: 85,
+        isRefreshing: false,
         activeVideoSrc: '/videos/VID20261110141303.mp4',
         utcTime: '14:32:08 UTC',
         telemetry: {
@@ -635,10 +697,50 @@
           occupancy_pct: 72,
           latency_ms: 21,
         },
+
+        get currentCamData() {
+          if (this.activeCam === 'cam_02') {
+            return {
+              name: 'CAM-02 (Perimeter Gate)',
+              motorcycles_detected: 28,
+              capacity_left: 14,
+              occupancy_pct: 67,
+              fps: 24,
+              confidence: 96.8,
+              latency_ms: 19
+            };
+          }
+          return {
+            name: 'CAM-01 (South Yard)',
+            motorcycles_detected: 72,
+            capacity_left: 28,
+            occupancy_pct: 72,
+            fps: 30,
+            confidence: 98.4,
+            latency_ms: 21
+          };
+        },
+
+        get sectorStats() {
+          if (this.selectedSector === 'zone_a') {
+            return { occupancy: '89.5%', surplus: '+128 Moto' };
+          } else if (this.selectedSector === 'zone_b') {
+            return { occupancy: '82.5%', surplus: '+10 Moto' };
+          } else if (this.selectedSector === 'zone_c') {
+            return { occupancy: '50.0%', surplus: '+10 Moto' };
+          }
+          return { occupancy: '72.0%', surplus: '+28 Moto' };
+        },
+
         init() {
           // Initialize Lucide Icons
           this.$nextTick(() => {
             lucide.createIcons();
+          });
+
+          // Watch tab changes to re-render icons if needed
+          this.$watch('activeTab', () => {
+            this.$nextTick(() => lucide.createIcons());
           });
 
           // Live UTC clock ticking
@@ -651,6 +753,22 @@
           this.fetchTelemetry();
           setInterval(() => this.fetchTelemetry(), 3000);
         },
+
+        selectCam(camId) {
+          this.activeCam = camId;
+          const video = document.getElementById('mainVideoPlayer');
+          if (camId === 'cam_02') {
+            this.activeVideoSrc = '/videos/VID20261110141233.mp4';
+          } else {
+            this.activeVideoSrc = '/videos/VID20261110141303.mp4';
+          }
+          if (video) {
+            video.src = this.activeVideoSrc;
+            video.currentTime = 0;
+            video.play().catch(() => {});
+          }
+        },
+
         switchFeed(mode) {
           const video = document.getElementById('mainVideoPlayer');
           if (mode === 'original') {
@@ -664,6 +782,25 @@
             this.overlayActive = true;
           }
         },
+
+        takeSnapshot() {
+          const imgSrc = this.activeCam === 'cam_01' ? '/outputs/preview_video2.jpg' : '/outputs/preview_video1.jpg';
+          const a = document.createElement('a');
+          a.href = imgSrc;
+          a.download = `MotoSpace_${this.activeCam}_${Date.now()}.jpg`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        },
+
+        refreshMesh() {
+          this.isRefreshing = true;
+          setTimeout(() => {
+            this.isRefreshing = false;
+            this.fetchTelemetry();
+          }, 800);
+        },
+
         async fetchTelemetry() {
           try {
             const res = await fetch('/api/telemetry');
