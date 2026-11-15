@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 from pathlib import Path
 from flask import Flask, jsonify, render_template, send_from_directory
 
@@ -150,15 +151,29 @@ def serve_video(filename: str):
     return jsonify({"error": f"Video '{filename}' not found"}), 404
 
 
+def get_lan_ip() -> str:
+    """Detect local Wi-Fi / LAN IP address for mobile testing."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+
 if __name__ == "__main__":
     # Ensure template and static dirs exist
     TEMPLATES_DIR.mkdir(exist_ok=True)
     STATIC_DIR.mkdir(exist_ok=True)
     
     port = int(os.environ.get("PORT", 8000))
-    print("=" * 60)
+    lan_ip = get_lan_ip()
+    print("=" * 64)
     print(" MotoSpace CV Telemetry - Local Web Dashboard")
-    print(f" URL: http://localhost:{port}")
+    print(f" • Local URL   : http://localhost:{port}")
+    print(f" • Mobile/Wi-Fi: http://{lan_ip}:{port}")
     print(" Press Ctrl+C to stop.")
-    print("=" * 60)
+    print("=" * 64)
     app.run(host="0.0.0.0", port=port, debug=False)
