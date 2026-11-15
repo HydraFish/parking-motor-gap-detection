@@ -17,6 +17,24 @@ STATIC_DIR = ROOT / "static"
 TEMPLATES_DIR = ROOT / "templates"
 OUTPUTS_DIR = ROOT / "outputs"
 
+# ============================================================================
+# OPTIONAL AI MODEL ENGINE BRIDGE (Loosely coupled)
+# Connects to friend's process_parking_video.py when OpenCV/YOLO are installed.
+# Gracefully falls back to calibrated demo mode if dependencies are not present.
+# ============================================================================
+try:
+    import cv2
+    from ultralytics import YOLO
+    from process_parking_video import (
+        TemporalGapSmoother,
+        estimate_and_draw_gaps,
+        infer_frame,
+        load_config,
+    )
+    MODEL_ENGINE_AVAILABLE = True
+except ImportError:
+    MODEL_ENGINE_AVAILABLE = False
+
 app = Flask(
     __name__,
     static_folder=str(STATIC_DIR),
@@ -151,6 +169,18 @@ def serve_video(filename: str):
     return jsonify({"error": f"Video '{filename}' not found"}), 404
 
 
+@app.route("/api/health")
+def health():
+    """Return backend status and model engine availability."""
+    return jsonify({
+        "status": "healthy",
+        "model_engine_available": MODEL_ENGINE_AVAILABLE,
+        "mode": "live_inference" if MODEL_ENGINE_AVAILABLE else "calibrated_telemetry",
+        "video_configs_loaded": (ROOT / "video_configs.json").exists(),
+        "weights_loaded": (ROOT / "best.pt").exists(),
+    })
+
+
 def get_lan_ip() -> str:
     """Detect local Wi-Fi / LAN IP address for mobile testing."""
     try:
@@ -174,6 +204,7 @@ if __name__ == "__main__":
     print(" MotoSpace CV Telemetry - Local Web Dashboard")
     print(f" • Local URL   : http://localhost:{port}")
     print(f" • Mobile/Wi-Fi: http://{lan_ip}:{port}")
+    print(f" • AI Engine   : {'LIVE (OpenCV + YOLO)' if MODEL_ENGINE_AVAILABLE else 'STANDBY (Calibrated Telemetry)'}")
     print(" Press Ctrl+C to stop.")
     print("=" * 64)
     app.run(host="0.0.0.0", port=port, debug=False)
