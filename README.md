@@ -50,6 +50,8 @@ python process_parking_video.py `
 - polygon baris/ROI;
 - arah baris (`axis`);
 - `boundary_start` dan `boundary_end` dalam koordinat normalisasi 0–1;
+- `boundary_visibility.start` dan `boundary_visibility.end` untuk menandai apakah
+  ujung fisik baris benar-benar terlihat;
 - `reference_pitch` sebagai rasio terhadap lebar frame;
 - `edge_margin_pitch` (default `0.5`);
 - confidence dan ukuran inferensi.
@@ -97,6 +99,17 @@ dari seluruh panjang proyeksi `boundary_start` sampai `boundary_end`:
 ```text
 capacity = max(0, floor(row_length / reference_pitch + tolerance))
 ```
+
+Tepi frame kamera tidak otomatis merupakan batas fisik parkiran. `edge_start`
+hanya dihitung jika `boundary_visibility.start` bernilai `true`, dan `edge_end`
+hanya dihitung jika `boundary_visibility.end` bernilai `true`. Empty row hanya
+dilaporkan ketika kedua batas fisik terlihat dan valid. Gap internal tetap dapat
+dihitung karena kedua ujungnya berasal dari motor yang terlihat.
+
+Pada profil `video2_gap_demo`, kedua visibility setiap row bernilai `false`
+karena baris parkir masih berlanjut atau kendaraan terpotong pada tepi frame.
+Koordinat boundary tetap membatasi anggota row, tetapi tidak diperlakukan sebagai
+ujung fisik untuk edge gap atau empty row.
 
 Hasil masih estimasi relatif dalam piksel, bukan ukuran meter.
 

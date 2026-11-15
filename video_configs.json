@@ -52,6 +52,10 @@
           "axis": [1.0, 0.0],
           "boundary_start": [0.0, 0.25],
           "boundary_end": [1.0, 0.25],
+          "boundary_visibility": {
+            "start": false,
+            "end": false
+          },
           "edge_margin_pitch": 0.5,
           "reference_pitch": 0.132
         },
@@ -66,6 +70,10 @@
           "axis": [1.0, 0.0],
           "boundary_start": [0.0, 0.505],
           "boundary_end": [1.0, 0.505],
+          "boundary_visibility": {
+            "start": false,
+            "end": false
+          },
           "edge_margin_pitch": 0.5,
           "reference_pitch": 0.165
         },
@@ -80,6 +88,10 @@
           "axis": [1.0, 0.0],
           "boundary_start": [0.0, 0.955],
           "boundary_end": [1.0, 0.955],
+          "boundary_visibility": {
+            "start": false,
+            "end": false
+          },
           "edge_margin_pitch": 0.5,
           "reference_pitch": 0.146
         }

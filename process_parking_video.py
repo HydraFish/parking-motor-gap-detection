@@ -53,6 +53,17 @@ class GapResult:
     capacity: int
 
 
+@dataclass(frozen=True)
+class RowGeometry:
+    polygon: np.ndarray
+    axis: np.ndarray
+    boundary_start: np.ndarray
+    boundary_end: np.ndarray
+    start_projection: float
+    end_projection: float
+    length: float
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Deteksi motor dan estimasi celah parkir dari video."
@@ -189,6 +200,60 @@ def point_in_polygon(point: tuple[float, float], polygon: np.ndarray) -> bool:
     return cv2.pointPolygonTest(polygon.astype(np.float32), point, False) >= 0
 
 
+def build_row_geometry(
+    row: dict[str, Any], width: int, height: int
+) -> RowGeometry:
+    row_id = str(row["id"])
+    polygon = scaled_polygon(row["polygon"], width, height)
+    axis = np.array(row.get("axis", [1.0, 0.0]), dtype=np.float64)
+    axis_norm = float(np.linalg.norm(axis))
+    if axis_norm <= 1e-9:
+        raise ValueError(f"Row '{row_id}': axis tidak boleh berupa vektor nol")
+    axis /= axis_norm
+
+    boundary_start = scaled_point(row["boundary_start"], width, height)
+    boundary_end = scaled_point(row["boundary_end"], width, height)
+    boundary_vector = boundary_end - boundary_start
+    if float(np.linalg.norm(boundary_vector)) <= 1e-9:
+        raise ValueError(
+            f"Row '{row_id}': boundary_start dan boundary_end tidak boleh sama"
+        )
+
+    signed_length = float(np.dot(boundary_vector, axis))
+    if abs(signed_length) <= 1e-9:
+        raise ValueError(
+            f"Row '{row_id}': boundary tidak memiliki panjang positif sepanjang axis"
+        )
+    if signed_length < 0:
+        axis = -axis
+        signed_length = -signed_length
+
+    start_projection = float(np.dot(boundary_start, axis))
+    return RowGeometry(
+        polygon=polygon,
+        axis=axis,
+        boundary_start=boundary_start,
+        boundary_end=boundary_end,
+        start_projection=start_projection,
+        end_projection=start_projection + signed_length,
+        length=signed_length,
+    )
+
+
+def detections_in_row(
+    detections: list[Detection], geometry: RowGeometry
+) -> list[Detection]:
+    members: list[Detection] = []
+    for detection in detections:
+        point = detection.bottom_center
+        if not point_in_polygon(point, geometry.polygon):
+            continue
+        projection = float(np.dot(np.array(point, dtype=np.float64), geometry.axis))
+        if geometry.start_projection <= projection <= geometry.end_projection:
+            members.append(detection)
+    return members
+
+
 def put_label(
     frame: np.ndarray,
     text: str,
@@ -241,60 +306,63 @@ def calculate_gaps(
 
     for row in profile.get("rows", []):
         row_id = str(row["id"])
-        polygon = scaled_polygon(row["polygon"], width, height)
-        members = [d for d in detections if point_in_polygon(d.bottom_center, polygon)]
+        geometry = build_row_geometry(row, width, height)
+        members = detections_in_row(detections, geometry)
         row_counts[row_id] = len(members)
 
-        axis = np.array(row.get("axis", [1.0, 0.0]), dtype=np.float64)
-        axis /= max(np.linalg.norm(axis), 1e-9)
-        boundary_start = scaled_point(row["boundary_start"], width, height)
-        boundary_end = scaled_point(row["boundary_end"], width, height)
-        if float(np.dot(boundary_end - boundary_start, axis)) < 0:
-            axis = -axis
-
-        members.sort(key=lambda d: float(np.dot(np.array(d.bottom_center), axis)))
+        members.sort(
+            key=lambda d: float(
+                np.dot(np.array(d.bottom_center), geometry.axis)
+            )
+        )
         pitch_ratio = row.get("reference_pitch", row.get("reference_pitch_width_ratio"))
         if pitch_ratio is None:
             raise KeyError(f"Row '{row_id}' tidak memiliki reference_pitch")
         pitch_px = float(pitch_ratio) * width
         pitch_px = max(pitch_px, 1e-9)
         edge_margin = float(row.get("edge_margin_pitch", 0.5))
+        visibility = row.get("boundary_visibility", {})
+        start_visible = visibility.get("start") is True
+        end_visible = visibility.get("end") is True
 
         if not members:
-            distance = max(0.0, float(np.dot(boundary_end - boundary_start, axis)))
-            capacity = max(0, math.floor(distance / pitch_px + tolerance))
-            gaps.append(
-                GapResult(
-                    row_id,
-                    "empty_row",
-                    tuple(boundary_start),
-                    tuple(boundary_end),
-                    distance,
-                    capacity,
+            if start_visible and end_visible:
+                capacity = max(0, math.floor(geometry.length / pitch_px + tolerance))
+                gaps.append(
+                    GapResult(
+                        row_id,
+                        "empty_row",
+                        tuple(geometry.boundary_start),
+                        tuple(geometry.boundary_end),
+                        geometry.length,
+                        capacity,
+                    )
                 )
-            )
             continue
 
         first = np.array(members[0].bottom_center, dtype=np.float64)
-        start_distance = max(0.0, float(np.dot(first - boundary_start, axis)))
-        start_capacity = max(
-            0, math.floor(start_distance / pitch_px + tolerance - edge_margin)
-        )
-        gaps.append(
-            GapResult(
-                row_id,
-                "edge_start",
-                tuple(boundary_start),
-                tuple(first),
-                start_distance,
-                start_capacity,
+        if start_visible:
+            start_distance = max(
+                0.0, float(np.dot(first - geometry.boundary_start, geometry.axis))
             )
-        )
+            start_capacity = max(
+                0, math.floor(start_distance / pitch_px + tolerance - edge_margin)
+            )
+            gaps.append(
+                GapResult(
+                    row_id,
+                    "edge_start",
+                    tuple(geometry.boundary_start),
+                    tuple(first),
+                    start_distance,
+                    start_capacity,
+                )
+            )
 
         for left, right in zip(members, members[1:]):
             p1 = np.array(left.bottom_center, dtype=np.float64)
             p2 = np.array(right.bottom_center, dtype=np.float64)
-            distance = abs(float(np.dot(p2 - p1, axis)))
+            distance = abs(float(np.dot(p2 - p1, geometry.axis)))
             capacity = max(0, math.floor(distance / pitch_px + tolerance) - 1)
             gaps.append(
                 GapResult(
@@ -308,20 +376,23 @@ def calculate_gaps(
             )
 
         last = np.array(members[-1].bottom_center, dtype=np.float64)
-        end_distance = max(0.0, float(np.dot(boundary_end - last, axis)))
-        end_capacity = max(
-            0, math.floor(end_distance / pitch_px + tolerance - edge_margin)
-        )
-        gaps.append(
-            GapResult(
-                row_id,
-                "edge_end",
-                tuple(last),
-                tuple(boundary_end),
-                end_distance,
-                end_capacity,
+        if end_visible:
+            end_distance = max(
+                0.0, float(np.dot(geometry.boundary_end - last, geometry.axis))
             )
-        )
+            end_capacity = max(
+                0, math.floor(end_distance / pitch_px + tolerance - edge_margin)
+            )
+            gaps.append(
+                GapResult(
+                    row_id,
+                    "edge_end",
+                    tuple(last),
+                    tuple(geometry.boundary_end),
+                    end_distance,
+                    end_capacity,
+                )
+            )
 
     return gaps, row_counts
 
@@ -376,9 +447,9 @@ def estimate_and_draw_gaps(
     gaps, row_counts = calculate_gaps(detections, profile, width, height)
 
     for row in profile.get("rows", []):
-        polygon = scaled_polygon(row["polygon"], width, height)
-        cv2.polylines(frame, [polygon], True, (255, 200, 0), 2)
-        label_at = tuple(int(v) for v in polygon[0])
+        geometry = build_row_geometry(row, width, height)
+        cv2.polylines(frame, [geometry.polygon], True, (255, 200, 0), 2)
+        label_at = tuple(int(v) for v in geometry.polygon[0])
         put_label(
             frame,
             str(row["id"]),
@@ -387,7 +458,7 @@ def estimate_and_draw_gaps(
             0.48,
         )
 
-        members = [d for d in detections if point_in_polygon(d.bottom_center, polygon)]
+        members = detections_in_row(detections, geometry)
         for detection in members:
             point = tuple(np.round(detection.bottom_center).astype(int))
             cv2.circle(frame, point, 5, (0, 230, 255), -1, cv2.LINE_AA)
