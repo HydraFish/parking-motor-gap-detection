@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Video input dan output
+*.mp4
+*.avi
+*.mov
+
+# File sementara
+*.tmp
+.DS_Store
