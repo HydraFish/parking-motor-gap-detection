@@ -9,6 +9,7 @@ Proyek ini memakai `best.pt` untuk mendeteksi motor pada video. Bounding box dib
 - `run_demo.py` — memproses dua video contoh sekaligus.
 - `video_configs.json` — ROI/baris parkir, pitch, confidence, dan mode tiap video.
 - `test_gap_calculation.py` — pengujian geometri gap tanpa memproses video.
+- `test_temporal_smoothing.py` — pengujian stabilitas gap sepanjang waktu.
 - `requirements.txt` — library Python.
 
 ## Cara paling mudah di VS Code (Windows)
@@ -118,6 +119,27 @@ tanpa membuka video. Jalankan pengujian sederhana dengan:
 
 ```powershell
 python -m unittest -v test_gap_calculation.py
+```
+
+## P4: Temporal Hysteresis / Stability Smoothing
+
+P3 menghitung lokasi dan kapasitas gap secara geometri pada satu frame. P4
+menstabilkan hasil P3 sepanjang waktu sebelum gap dihitung dan ditampilkan.
+P4 tidak melakukan tracking motor, tidak mengubah deteksi YOLO, dan bukan
+training model baru.
+
+Pada `video2_gap_demo`, `activation_seconds = 1.5` berarti gap harus terus
+ditemukan selama 1,5 detik sebelum dikonfirmasi. `release_seconds = 0.75`
+mempertahankan gap terkonfirmasi selama kehilangan sementara hingga 0,75 detik.
+Pencocokan ant_frame memakai row, jenis gap, dan overlap interval sepanjang axis
+row. Kapasitas stabil menggunakan median lima pengamatan terakhir.
+
+Jika `temporal_smoothing.enabled` tidak ada atau bernilai `false`, hasil P3
+langsung digunakan tanpa penundaan. Video 1 tetap memakai mode
+`detection_only`, sehingga P4 tidak dijalankan.
+
+```powershell
+python test_temporal_smoothing.py
 ```
 
 ## Catatan dua video contoh

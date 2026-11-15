@@ -37,6 +37,13 @@
       "inference_stride": 2,
       "gap_tolerance": 0.10,
       "show_tight_gaps": false,
+      "temporal_smoothing": {
+        "enabled": true,
+        "activation_seconds": 1.5,
+        "release_seconds": 0.75,
+        "match_overlap_threshold": 0.5,
+        "capacity_window": 5
+      },
       "sliced_inference": {
         "enabled": false
       },

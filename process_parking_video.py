@@ -20,8 +20,10 @@ import math
 import shutil
 import subprocess
 import tempfile
-from dataclasses import dataclass
+from collections import deque
+from dataclasses import dataclass, field, replace
 from pathlib import Path
+from statistics import median
 from typing import Any, Iterable
 
 import cv2
@@ -62,6 +64,18 @@ class RowGeometry:
     start_projection: float
     end_projection: float
     length: float
+
+
+@dataclass
+class _TemporalGapState:
+    state_id: int
+    row_id: str
+    gap_type: str
+    first_seen: float
+    last_seen: float
+    latest_gap: GapResult
+    capacities: deque[int] = field(default_factory=deque)
+    confirmed: bool = False
 
 
 def parse_args() -> argparse.Namespace:
@@ -254,6 +268,162 @@ def detections_in_row(
     return members
 
 
+class TemporalGapSmoother:
+    """Stabilkan hasil P3 berdasarkan durasi dan overlap geometri gap."""
+
+    def __init__(
+        self,
+        profile: dict[str, Any],
+        frame_width: int,
+        frame_height: int,
+    ) -> None:
+        config = profile.get("temporal_smoothing", {})
+        self.enabled = config.get("enabled") is True
+        self.activation_seconds = max(0.0, float(config.get("activation_seconds", 0.0)))
+        self.release_seconds = max(0.0, float(config.get("release_seconds", 0.0)))
+        self.match_overlap_threshold = float(
+            config.get("match_overlap_threshold", 0.5)
+        )
+        if not 0.0 <= self.match_overlap_threshold <= 1.0:
+            raise ValueError("match_overlap_threshold harus berada pada rentang 0-1")
+        self.capacity_window = max(1, int(config.get("capacity_window", 5)))
+        self._row_geometry: dict[str, tuple[RowGeometry, float]] = {}
+
+        if self.enabled:
+            for row in profile.get("rows", []):
+                row_id = str(row["id"])
+                geometry = build_row_geometry(row, frame_width, frame_height)
+                pitch_ratio = row.get(
+                    "reference_pitch", row.get("reference_pitch_width_ratio")
+                )
+                if pitch_ratio is None:
+                    raise KeyError(f"Row '{row_id}' tidak memiliki reference_pitch")
+                pitch_px = max(float(pitch_ratio) * frame_width, 1e-9)
+                self._row_geometry[row_id] = (geometry, pitch_px)
+
+        self.reset()
+
+    def reset(self) -> None:
+        self._states: dict[int, _TemporalGapState] = {}
+        self._next_state_id = 1
+        self._last_timestamp: float | None = None
+
+    def _interval(self, gap: GapResult) -> tuple[float, float, float]:
+        if gap.row_id not in self._row_geometry:
+            raise KeyError(f"Row temporal tidak dikenal: '{gap.row_id}'")
+        geometry, pitch_px = self._row_geometry[gap.row_id]
+        start = float(np.dot(np.array(gap.start), geometry.axis))
+        end = float(np.dot(np.array(gap.end), geometry.axis))
+        return min(start, end), max(start, end), pitch_px
+
+    def _match_score(self, state: _TemporalGapState, gap: GapResult) -> float | None:
+        if state.row_id != gap.row_id or state.gap_type != gap.gap_type:
+            return None
+
+        old_start, old_end, pitch_px = self._interval(state.latest_gap)
+        new_start, new_end, _ = self._interval(gap)
+        intersection = max(0.0, min(old_end, new_end) - max(old_start, new_start))
+        union = max(old_end, new_end) - min(old_start, new_start)
+        overlap_ratio = intersection / union if union > 1e-9 else 1.0
+        if overlap_ratio >= self.match_overlap_threshold:
+            return 2.0 + overlap_ratio
+
+        old_center = (old_start + old_end) / 2.0
+        new_center = (new_start + new_end) / 2.0
+        normalized_center_distance = abs(new_center - old_center) / pitch_px
+        if normalized_center_distance <= 0.5:
+            return 1.0 - normalized_center_distance
+        return None
+
+    def _stable_capacity(self, state: _TemporalGapState) -> int:
+        values = sorted(max(0, value) for value in state.capacities)
+        if not values:
+            return 0
+        return max(0, math.floor(median(values)))
+
+    def _stable_results(self) -> list[GapResult]:
+        confirmed = [state for state in self._states.values() if state.confirmed]
+        confirmed.sort(
+            key=lambda state: (
+                state.row_id,
+                state.gap_type,
+                self._interval(state.latest_gap)[0],
+            )
+        )
+        return [
+            replace(state.latest_gap, capacity=self._stable_capacity(state))
+            for state in confirmed
+        ]
+
+    def update(
+        self, raw_gaps: list[GapResult], timestamp_seconds: float
+    ) -> list[GapResult]:
+        if not self.enabled:
+            return list(raw_gaps)
+        if not math.isfinite(timestamp_seconds) or timestamp_seconds < 0:
+            raise ValueError("timestamp_seconds harus bernilai terbatas dan tidak negatif")
+        if (
+            self._last_timestamp is not None
+            and timestamp_seconds < self._last_timestamp
+        ):
+            raise ValueError("timestamp_seconds tidak boleh bergerak mundur")
+        self._last_timestamp = timestamp_seconds
+
+        available_gaps = [gap for gap in raw_gaps if gap.capacity > 0]
+        possible_matches: list[tuple[float, int, int]] = []
+        for state_id, state in self._states.items():
+            for gap_index, gap in enumerate(available_gaps):
+                score = self._match_score(state, gap)
+                if score is not None:
+                    possible_matches.append((score, state_id, gap_index))
+
+        possible_matches.sort(key=lambda item: (-item[0], item[1], item[2]))
+        matched_states: set[int] = set()
+        matched_gaps: set[int] = set()
+        for _, state_id, gap_index in possible_matches:
+            if state_id in matched_states or gap_index in matched_gaps:
+                continue
+            state = self._states[state_id]
+            gap = available_gaps[gap_index]
+            state.last_seen = timestamp_seconds
+            state.latest_gap = gap
+            state.capacities.append(max(0, gap.capacity))
+            if timestamp_seconds - state.first_seen >= self.activation_seconds:
+                state.confirmed = True
+            matched_states.add(state_id)
+            matched_gaps.add(gap_index)
+
+        for gap_index, gap in enumerate(available_gaps):
+            if gap_index in matched_gaps:
+                continue
+            capacities: deque[int] = deque(maxlen=self.capacity_window)
+            capacities.append(max(0, gap.capacity))
+            state = _TemporalGapState(
+                state_id=self._next_state_id,
+                row_id=gap.row_id,
+                gap_type=gap.gap_type,
+                first_seen=timestamp_seconds,
+                last_seen=timestamp_seconds,
+                latest_gap=gap,
+                capacities=capacities,
+                confirmed=self.activation_seconds == 0.0,
+            )
+            self._states[state.state_id] = state
+            matched_states.add(state.state_id)
+            self._next_state_id += 1
+
+        for state_id, state in list(self._states.items()):
+            if state_id in matched_states:
+                continue
+            if not state.confirmed:
+                del self._states[state_id]
+                continue
+            if timestamp_seconds - state.last_seen > self.release_seconds:
+                del self._states[state_id]
+
+        return self._stable_results()
+
+
 def put_label(
     frame: np.ndarray,
     text: str,
@@ -442,9 +612,16 @@ def estimate_and_draw_gaps(
     frame: np.ndarray,
     detections: list[Detection],
     profile: dict[str, Any],
+    smoother: TemporalGapSmoother | None = None,
+    timestamp_seconds: float = 0.0,
 ) -> tuple[int, int, dict[str, int]]:
     height, width = frame.shape[:2]
-    gaps, row_counts = calculate_gaps(detections, profile, width, height)
+    raw_gaps, row_counts = calculate_gaps(detections, profile, width, height)
+    gaps = (
+        smoother.update(raw_gaps, timestamp_seconds)
+        if smoother is not None
+        else raw_gaps
+    )
 
     for row in profile.get("rows", []):
         geometry = build_row_geometry(row, width, height)
@@ -489,7 +666,13 @@ def draw_dashboard(
     ]
     if profile.get("mode") == "gap":
         lines.append(f"Kandidat gap: {candidates} | estimasi kapasitas tambahan: {capacity}")
-        lines.append("Gap dihitung dari posisi motor; bukan kelas yang dideteksi YOLO")
+        smoothing_enabled = (
+            profile.get("temporal_smoothing", {}).get("enabled") is True
+        )
+        if smoothing_enabled:
+            lines.append("Temporal smoothing: aktif")
+        else:
+            lines.append("Gap dihitung dari posisi motor; bukan kelas yang dideteksi YOLO")
     else:
         lines.append("Mode deteksi saja: estimasi gap dinonaktifkan pada POV sangat jauh/padat")
         lines.append("Beberapa bounding box dapat mewakili beberapa motor; jumlah belum reliabel")
@@ -568,6 +751,10 @@ def process_video(args: argparse.Namespace) -> None:
     height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
     frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
 
+    gap_smoother: TemporalGapSmoother | None = None
+    if profile.get("mode") == "gap":
+        gap_smoother = TemporalGapSmoother(profile, width, height)
+
     model = YOLO(str(model_path))
     with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False, dir=output_path.parent) as tmp:
         temporary_video = Path(tmp.name)
@@ -602,7 +789,11 @@ def process_video(args: argparse.Namespace) -> None:
             candidates = capacity = 0
             if profile.get("mode") == "gap":
                 candidates, capacity, _ = estimate_and_draw_gaps(
-                    annotated, latest_detections, profile
+                    annotated,
+                    latest_detections,
+                    profile,
+                    smoother=gap_smoother,
+                    timestamp_seconds=frame_index / max(fps, 1e-9),
                 )
 
             draw_dashboard(
