@@ -247,22 +247,31 @@
 
           <!-- Video Viewport -->
           <div class="relative bg-slate-950 aspect-video w-full flex items-center justify-center overflow-hidden">
-            <!-- Native Video Player for Smooth Demo Playback -->
+            <!-- Native Clean Video Player (Loops infinitely) -->
             <video 
               id="mainVideoPlayer" 
+              :src="activeVideoSrc"
               class="w-full h-full object-cover" 
               autoplay 
               loop 
               muted 
-              playsinline>
-              <source :src="activeVideoSrc" type="video/mp4">
-              Your browser does not support video.
+              playsinline
+              @ended="$el.currentTime = 0; $el.play()"
+              x-show="!overlayActive">
             </video>
+
+            <!-- AI Annotated Detection View (Shows the colored lines, bounding boxes & gaps) -->
+            <div x-show="overlayActive" class="w-full h-full relative flex items-center justify-center bg-black">
+              <img 
+                :src="activeCam === 'cam_01' ? '/outputs/preview_video2.jpg' : '/outputs/preview_video1.jpg'" 
+                class="w-full h-full object-cover" 
+                alt="AI Detection Overlay">
+            </div>
 
             <!-- On-Screen Telemetry Tag -->
             <div class="absolute top-4 left-4 bg-slate-900/80 backdrop-blur border border-slate-700/60 rounded px-2.5 py-1 text-[11px] font-mono text-slate-200 flex items-center gap-2">
               <span class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
-              <span>LIVE CAM-01</span>
+              <span x-text="activeCam === 'cam_01' ? 'LIVE CAM-01' : 'LIVE CAM-02'"></span>
               <span class="text-slate-500">|</span>
               <span class="text-blue-400">MOTORCYCLES: <span x-text="telemetry.motorcycles_detected">72</span></span>
             </div>
@@ -379,17 +388,13 @@
 
           <!-- Map / Video Viewport -->
           <div class="relative bg-slate-950 aspect-[21/9] w-full flex items-center justify-center overflow-hidden">
-            <video 
+            <img 
+              src="/outputs/preview_video2.jpg" 
               class="w-full h-full object-cover opacity-90" 
-              autoplay 
-              loop 
-              muted 
-              playsinline>
-              <source src="/videos/hasil_video2_gap.mp4" type="video/mp4">
-            </video>
-
+              alt="Orthomosaic Spatial Map">
+            
             <!-- Orthomosaic Overlay Tags -->
-            <div class="absolute inset-0 bg-blue-950/10 pointer-events-none"></div>
+            <div class="absolute inset-0 bg-blue-950/20 pointer-events-none"></div>
             
             <div class="absolute bottom-4 left-4 flex items-center gap-4 bg-slate-900/90 backdrop-blur px-3 py-1.5 rounded border border-slate-800 text-xs font-mono">
               <div class="flex items-center gap-2">
@@ -557,14 +562,11 @@
         <!-- Cinema Mode Player -->
         <div class="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden relative">
           <div class="aspect-video w-full bg-black relative flex items-center justify-center">
-            <video 
+            <!-- Detection Feed with Colored Lines & BBoxes -->
+            <img 
+              :src="activeCam === 'cam_01' ? '/outputs/preview_video2.jpg' : '/outputs/preview_video1.jpg'" 
               class="w-full h-full object-cover" 
-              autoplay 
-              loop 
-              muted 
-              playsinline>
-              <source :src="activeCam === 'cam_01' ? '/videos/hasil_video2_gap.mp4' : '/videos/hasil_video1_deteksi.mp4'" type="video/mp4">
-            </video>
+              alt="Live Monitoring Feed">
 
             <div class="absolute top-4 left-4 text-xs font-mono bg-black/70 px-3 py-1.5 rounded border border-white/10 text-white flex items-center gap-2">
               <span class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
@@ -625,7 +627,7 @@
         overlayActive: true,
         activeCam: 'cam_01',
         selectedSector: 'all',
-        activeVideoSrc: '/videos/hasil_video2_gap.mp4',
+        activeVideoSrc: '/videos/VID20261110141303.mp4',
         utcTime: '14:32:08 UTC',
         telemetry: {
           motorcycles_detected: 72,
@@ -651,14 +653,16 @@
         },
         switchFeed(mode) {
           const video = document.getElementById('mainVideoPlayer');
-          if (!video) return;
           if (mode === 'original') {
-            this.activeVideoSrc = '/videos/VID20261110141303.mp4';
+            this.overlayActive = false;
+            this.activeVideoSrc = this.activeCam === 'cam_01' ? '/videos/VID20261110141303.mp4' : '/videos/VID20261110141233.mp4';
+            if (video) {
+              video.currentTime = 0;
+              video.play().catch(() => {});
+            }
           } else {
-            this.activeVideoSrc = '/videos/hasil_video2_gap.mp4';
+            this.overlayActive = true;
           }
-          video.src = this.activeVideoSrc;
-          video.play().catch(() => {});
         },
         async fetchTelemetry() {
           try {

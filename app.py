@@ -112,6 +112,12 @@ def get_telemetry():
     return jsonify(telemetry)
 
 
+@app.route("/outputs/<path:filename>")
+def serve_output(filename: str):
+    """Serve files directly from outputs directory."""
+    return send_from_directory(str(OUTPUTS_DIR), filename)
+
+
 @app.route("/videos/<path:filename>")
 def serve_video(filename: str):
     """Serve demo and output video files directly with range requests."""
