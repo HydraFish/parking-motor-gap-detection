@@ -43,6 +43,16 @@ class Detection:
         return ((self.x1 + self.x2) / 2.0, self.y2)
 
 
+@dataclass(frozen=True)
+class GapResult:
+    row_id: str
+    gap_type: str
+    start: tuple[float, float]
+    end: tuple[float, float]
+    distance: float
+    capacity: int
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Deteksi motor dan estimasi celah parkir dari video."
@@ -171,6 +181,10 @@ def scaled_polygon(points: list[list[float]], width: int, height: int) -> np.nda
     )
 
 
+def scaled_point(point: list[float], width: int, height: int) -> np.ndarray:
+    return np.array([point[0] * width, point[1] * height], dtype=np.float64)
+
+
 def point_in_polygon(point: tuple[float, float], polygon: np.ndarray) -> bool:
     return cv2.pointPolygonTest(polygon.astype(np.float32), point, False) >= 0
 
@@ -212,55 +226,175 @@ def draw_detection(frame: np.ndarray, detection: Detection) -> None:
     put_label(frame, f"Motor {detection.confidence:.2f}", (x1, max(18, y1)), blue, 0.46)
 
 
-def estimate_and_draw_gaps(
-    frame: np.ndarray,
+def calculate_gaps(
     detections: list[Detection],
     profile: dict[str, Any],
-) -> tuple[int, int, dict[str, int]]:
-    height, width = frame.shape[:2]
-    total_capacity = 0
-    total_candidates = 0
+    frame_width: int,
+    frame_height: int,
+) -> tuple[list[GapResult], dict[str, int]]:
+    """Hitung gap tanpa menggambar agar geometri dapat diuji secara terpisah."""
+    width = frame_width
+    height = frame_height
+    gaps: list[GapResult] = []
     row_counts: dict[str, int] = {}
     tolerance = float(profile.get("gap_tolerance", 0.10))
 
     for row in profile.get("rows", []):
         row_id = str(row["id"])
         polygon = scaled_polygon(row["polygon"], width, height)
-        cv2.polylines(frame, [polygon], True, (255, 200, 0), 2)
-        label_at = tuple(int(v) for v in polygon[0])
-        put_label(frame, row_id, (label_at[0], max(20, label_at[1] + 18)), (255, 170, 0), 0.48)
-
         members = [d for d in detections if point_in_polygon(d.bottom_center, polygon)]
         row_counts[row_id] = len(members)
 
         axis = np.array(row.get("axis", [1.0, 0.0]), dtype=np.float64)
         axis /= max(np.linalg.norm(axis), 1e-9)
+        boundary_start = scaled_point(row["boundary_start"], width, height)
+        boundary_end = scaled_point(row["boundary_end"], width, height)
+        if float(np.dot(boundary_end - boundary_start, axis)) < 0:
+            axis = -axis
+
         members.sort(key=lambda d: float(np.dot(np.array(d.bottom_center), axis)))
-        pitch_px = float(row["reference_pitch_width_ratio"]) * width
+        pitch_ratio = row.get("reference_pitch", row.get("reference_pitch_width_ratio"))
+        if pitch_ratio is None:
+            raise KeyError(f"Row '{row_id}' tidak memiliki reference_pitch")
+        pitch_px = float(pitch_ratio) * width
+        pitch_px = max(pitch_px, 1e-9)
+        edge_margin = float(row.get("edge_margin_pitch", 0.5))
+
+        if not members:
+            distance = max(0.0, float(np.dot(boundary_end - boundary_start, axis)))
+            capacity = max(0, math.floor(distance / pitch_px + tolerance))
+            gaps.append(
+                GapResult(
+                    row_id,
+                    "empty_row",
+                    tuple(boundary_start),
+                    tuple(boundary_end),
+                    distance,
+                    capacity,
+                )
+            )
+            continue
+
+        first = np.array(members[0].bottom_center, dtype=np.float64)
+        start_distance = max(0.0, float(np.dot(first - boundary_start, axis)))
+        start_capacity = max(
+            0, math.floor(start_distance / pitch_px + tolerance - edge_margin)
+        )
+        gaps.append(
+            GapResult(
+                row_id,
+                "edge_start",
+                tuple(boundary_start),
+                tuple(first),
+                start_distance,
+                start_capacity,
+            )
+        )
 
         for left, right in zip(members, members[1:]):
             p1 = np.array(left.bottom_center, dtype=np.float64)
             p2 = np.array(right.bottom_center, dtype=np.float64)
             distance = abs(float(np.dot(p2 - p1, axis)))
-            capacity = max(0, math.floor(distance / max(pitch_px, 1e-9) + tolerance) - 1)
+            capacity = max(0, math.floor(distance / pitch_px + tolerance) - 1)
+            gaps.append(
+                GapResult(
+                    row_id,
+                    "internal",
+                    tuple(p1),
+                    tuple(p2),
+                    distance,
+                    capacity,
+                )
+            )
 
-            a = tuple(np.round(p1).astype(int))
-            b = tuple(np.round(p2).astype(int))
-            midpoint = tuple(np.round((p1 + p2) / 2.0).astype(int))
-            if capacity > 0:
-                total_candidates += 1
-                total_capacity += capacity
-                cv2.line(frame, a, b, (35, 210, 70), 6, cv2.LINE_AA)
-                wording = f"Estimasi muat {capacity} motor"
-                put_label(frame, wording, (midpoint[0] - 65, midpoint[1] - 8), (25, 155, 50), 0.42)
-            elif profile.get("show_tight_gaps", False):
+        last = np.array(members[-1].bottom_center, dtype=np.float64)
+        end_distance = max(0.0, float(np.dot(boundary_end - last, axis)))
+        end_capacity = max(
+            0, math.floor(end_distance / pitch_px + tolerance - edge_margin)
+        )
+        gaps.append(
+            GapResult(
+                row_id,
+                "edge_end",
+                tuple(last),
+                tuple(boundary_end),
+                end_distance,
+                end_capacity,
+            )
+        )
+
+    return gaps, row_counts
+
+
+def draw_gap_results(
+    frame: np.ndarray,
+    gaps: list[GapResult],
+    show_tight_gaps: bool = False,
+) -> None:
+    colors = {
+        "internal": (35, 210, 70),
+        "edge_start": (0, 165, 255),
+        "edge_end": (0, 165, 255),
+        "empty_row": (190, 70, 200),
+    }
+    label_colors = {
+        "internal": (25, 155, 50),
+        "edge_start": (0, 120, 220),
+        "edge_end": (0, 120, 220),
+        "empty_row": (145, 45, 160),
+    }
+
+    for gap in gaps:
+        a = tuple(np.round(gap.start).astype(int))
+        b = tuple(np.round(gap.end).astype(int))
+        if gap.capacity <= 0:
+            if show_tight_gaps and gap.gap_type == "internal":
                 cv2.line(frame, a, b, (120, 120, 120), 2, cv2.LINE_AA)
+            continue
 
+        midpoint = tuple(
+            np.round((np.array(gap.start) + np.array(gap.end)) / 2.0).astype(int)
+        )
+        color = colors[gap.gap_type]
+        cv2.line(frame, a, b, color, 6, cv2.LINE_AA)
+        wording = f"{gap.gap_type}: muat {gap.capacity} motor"
+        put_label(
+            frame,
+            wording,
+            (midpoint[0] - 65, midpoint[1] - 8),
+            label_colors[gap.gap_type],
+            0.42,
+        )
+
+
+def estimate_and_draw_gaps(
+    frame: np.ndarray,
+    detections: list[Detection],
+    profile: dict[str, Any],
+) -> tuple[int, int, dict[str, int]]:
+    height, width = frame.shape[:2]
+    gaps, row_counts = calculate_gaps(detections, profile, width, height)
+
+    for row in profile.get("rows", []):
+        polygon = scaled_polygon(row["polygon"], width, height)
+        cv2.polylines(frame, [polygon], True, (255, 200, 0), 2)
+        label_at = tuple(int(v) for v in polygon[0])
+        put_label(
+            frame,
+            str(row["id"]),
+            (label_at[0], max(20, label_at[1] + 18)),
+            (255, 170, 0),
+            0.48,
+        )
+
+        members = [d for d in detections if point_in_polygon(d.bottom_center, polygon)]
         for detection in members:
             point = tuple(np.round(detection.bottom_center).astype(int))
             cv2.circle(frame, point, 5, (0, 230, 255), -1, cv2.LINE_AA)
 
-    return total_candidates, total_capacity, row_counts
+    draw_gap_results(frame, gaps, bool(profile.get("show_tight_gaps", False)))
+    positive_gaps = [gap for gap in gaps if gap.capacity > 0]
+    return len(positive_gaps), sum(gap.capacity for gap in positive_gaps), row_counts
 
 
 def draw_dashboard(

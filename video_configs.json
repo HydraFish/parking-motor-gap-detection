@@ -50,7 +50,10 @@
             [0.0, 0.29]
           ],
           "axis": [1.0, 0.0],
-          "reference_pitch_width_ratio": 0.132
+          "boundary_start": [0.0, 0.25],
+          "boundary_end": [1.0, 0.25],
+          "edge_margin_pitch": 0.5,
+          "reference_pitch": 0.132
         },
         {
           "id": "BARIS_TENGAH",
@@ -61,7 +64,10 @@
             [0.0, 0.56]
           ],
           "axis": [1.0, 0.0],
-          "reference_pitch_width_ratio": 0.165
+          "boundary_start": [0.0, 0.505],
+          "boundary_end": [1.0, 0.505],
+          "edge_margin_pitch": 0.5,
+          "reference_pitch": 0.165
         },
         {
           "id": "BARIS_BAWAH",
@@ -72,7 +78,10 @@
             [0.0, 1.0]
           ],
           "axis": [1.0, 0.0],
-          "reference_pitch_width_ratio": 0.146
+          "boundary_start": [0.0, 0.955],
+          "boundary_end": [1.0, 0.955],
+          "edge_margin_pitch": 0.5,
+          "reference_pitch": 0.146
         }
       ]
     }
