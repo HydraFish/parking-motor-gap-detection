@@ -8,7 +8,14 @@ venv/
 *.mp4
 *.avi
 *.mov
+outputs/
+
+# Design references and external skills
+design-ref/
+andrej-karpathy-skills-main/
 
 # File sementara
 *.tmp
 .DS_Store
+Thumbs.db
+.vscode/

@@ -1,0 +1,108 @@
+{
+  "default_profile": "generic_detection",
+  "profiles": {
+    "generic_detection": {
+      "match": [],
+      "mode": "detection_only",
+      "conf": 0.15,
+      "imgsz": 640,
+      "inference_stride": 2,
+      "sliced_inference": {
+        "enabled": false
+      }
+    },
+    "video1_wide_dense": {
+      "match": [
+        "VID20261110141233"
+      ],
+      "mode": "detection_only",
+      "conf": 0.25,
+      "imgsz": 960,
+      "inference_stride": 6,
+      "sliced_inference": {
+        "enabled": true,
+        "tile_height": 500,
+        "overlap": 0.30,
+        "nms_iou": 0.45
+      },
+      "note": "POV sangat jauh dan padat. Model sering menggabungkan beberapa motor dalam satu box, jadi gap dan jumlah motor tidak dilaporkan sebagai hasil valid."
+    },
+    "video2_gap_demo": {
+      "match": [
+        "VID20261110141303"
+      ],
+      "mode": "gap",
+      "conf": 0.15,
+      "imgsz": 640,
+      "inference_stride": 2,
+      "gap_tolerance": 0.10,
+      "show_tight_gaps": false,
+      "temporal_smoothing": {
+        "enabled": true,
+        "activation_seconds": 1.5,
+        "release_seconds": 0.75,
+        "match_overlap_threshold": 0.5,
+        "capacity_window": 5
+      },
+      "sliced_inference": {
+        "enabled": false
+      },
+      "rows": [
+        {
+          "id": "BARIS_ATAS",
+          "polygon": [
+            [0.0, 0.21],
+            [1.0, 0.21],
+            [1.0, 0.29],
+            [0.0, 0.29]
+          ],
+          "axis": [1.0, 0.0],
+          "boundary_start": [0.0, 0.25],
+          "boundary_end": [1.0, 0.25],
+          "boundary_visibility": {
+            "start": false,
+            "end": false
+          },
+          "edge_margin_pitch": 0.5,
+          "reference_pitch": 0.132
+        },
+        {
+          "id": "BARIS_TENGAH",
+          "polygon": [
+            [0.0, 0.45],
+            [1.0, 0.45],
+            [1.0, 0.56],
+            [0.0, 0.56]
+          ],
+          "axis": [1.0, 0.0],
+          "boundary_start": [0.0, 0.505],
+          "boundary_end": [1.0, 0.505],
+          "boundary_visibility": {
+            "start": false,
+            "end": false
+          },
+          "edge_margin_pitch": 0.5,
+          "reference_pitch": 0.165
+        },
+        {
+          "id": "BARIS_BAWAH",
+          "polygon": [
+            [0.0, 0.91],
+            [1.0, 0.91],
+            [1.0, 1.0],
+            [0.0, 1.0]
+          ],
+          "axis": [1.0, 0.0],
+          "boundary_start": [0.0, 0.955],
+          "boundary_end": [1.0, 0.955],
+          "boundary_visibility": {
+            "start": false,
+            "end": false
+          },
+          "edge_margin_pitch": 0.5,
+          "reference_pitch": 0.146
+        }
+      ]
+    }
+  }
+}
