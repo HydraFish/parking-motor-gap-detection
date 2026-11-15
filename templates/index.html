@@ -93,13 +93,13 @@
           <span>Live Monitoring</span>
         </button>
 
-        <!-- Settings (Secondary) -->
+        <!-- Settings Tab -->
         <button 
           @click="activeTab = 'settings'"
-          :class="activeTab === 'settings' ? 'bg-blue-600 text-white font-medium' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'"
-          class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm transition-all text-left opacity-70">
-          <i data-lucide="settings" class="w-4 h-4"></i>
-          <span>Settings</span>
+          :class="activeTab === 'settings' ? 'bg-blue-600 text-white font-medium shadow-md shadow-blue-600/30' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'"
+          class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm transition-all text-left">
+          <i data-lucide="sliders" class="w-4 h-4"></i>
+          <span>Settings & Calibration</span>
         </button>
       </nav>
     </div>
@@ -592,14 +592,14 @@
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
             <button 
-              @click="activeCam = 'cam_01'"
+              @click="selectCam('cam_01')"
               :class="activeCam === 'cam_01' ? 'bg-blue-600 text-white' : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-white'"
               class="px-4 py-2 rounded-lg text-xs font-semibold transition flex items-center gap-2">
               <i data-lucide="camera" class="w-3.5 h-3.5"></i>
               CAM-01 (Main Yard)
             </button>
             <button 
-              @click="activeCam = 'cam_02'"
+              @click="selectCam('cam_02')"
               :class="activeCam === 'cam_02' ? 'bg-blue-600 text-white' : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-white'"
               class="px-4 py-2 rounded-lg text-xs font-semibold transition flex items-center gap-2">
               <i data-lucide="camera" class="w-3.5 h-3.5"></i>
@@ -610,27 +610,61 @@
           <div class="flex items-center gap-4 text-xs font-mono">
             <span class="inline-flex items-center gap-1.5 text-emerald-400">
               <span class="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
-              LIVE FEED: 24 FPS
+              LIVE FEED: <span x-text="currentCamData.fps + ' FPS'">24 FPS</span>
             </span>
-            <div class="flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg">
+            <label class="flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg cursor-pointer">
               <span class="text-slate-300">AI Mesh Overlay</span>
-              <input type="checkbox" checked class="accent-blue-600 rounded">
-            </div>
+              <input type="checkbox" x-model="monitoringMesh" class="accent-blue-600 rounded cursor-pointer">
+            </label>
           </div>
         </div>
 
         <!-- Cinema Mode Player -->
         <div class="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden relative">
           <div class="aspect-video w-full bg-black relative flex items-center justify-center">
-            <!-- Detection Feed with Colored Lines & BBoxes -->
+            <!-- Detection Feed (When Mesh is active) -->
             <img 
+              x-show="monitoringMesh"
               :src="activeCam === 'cam_01' ? '/outputs/preview_video2.jpg' : '/outputs/preview_video1.jpg'" 
               class="w-full h-full object-cover" 
               alt="Live Monitoring Feed">
 
-            <div class="absolute top-4 left-4 text-xs font-mono bg-black/70 px-3 py-1.5 rounded border border-white/10 text-white flex items-center gap-2">
+            <!-- Clean Video (When Mesh is toggled off) -->
+            <video 
+              x-show="!monitoringMesh"
+              :src="activeVideoSrc"
+              class="w-full h-full object-cover"
+              autoplay 
+              loop 
+              muted 
+              playsinline
+              @ended="$el.currentTime = 0; $el.play()">
+            </video>
+
+            <!-- Top Overlay Badge -->
+            <div class="absolute top-4 left-4 text-xs font-mono bg-black/75 backdrop-blur px-3 py-1.5 rounded border border-white/10 text-white flex items-center gap-2">
               <span class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
               <span x-text="activeCam === 'cam_01' ? 'CAM 01 | UNSTRUCTURED YARD' : 'CAM 02 | PERIMETER GATE'"></span>
+              <span class="text-slate-500">|</span>
+              <span class="text-emerald-400 font-bold" x-text="monitoringMesh ? 'AI MESH ACTIVE' : 'RAW SENSOR FEED'"></span>
+            </div>
+
+            <!-- Cinema Player Timeline Controls Bar -->
+            <div class="absolute bottom-3 inset-x-4 bg-slate-950/80 backdrop-blur border border-slate-800 rounded-lg p-2.5 flex items-center justify-between text-xs font-mono">
+              <div class="flex items-center gap-3">
+                <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span class="text-slate-300">STREAMING</span>
+                <span class="text-slate-600">|</span>
+                <span class="text-slate-400" x-text="utcTime"></span>
+              </div>
+              <div class="flex items-center gap-3">
+                <button @click="takeSnapshot()" class="hover:text-blue-400 flex items-center gap-1 transition text-slate-300">
+                  <i data-lucide="camera" class="w-3.5 h-3.5"></i>
+                  <span>Snap</span>
+                </button>
+                <span class="text-slate-700">|</span>
+                <span class="text-blue-400 font-bold" x-text="currentCamData.confidence + '% Conf'"></span>
+              </div>
             </div>
           </div>
 
@@ -639,12 +673,12 @@
             <div class="flex items-center gap-6">
               <div>
                 <span class="text-slate-500 uppercase text-[10px] block font-mono">Motorcycles Detected</span>
-                <span class="text-xl font-bold text-white font-mono" x-text="telemetry.motorcycles_detected">72</span>
+                <span class="text-xl font-bold text-white font-mono" x-text="currentCamData.motorcycles_detected">72</span>
               </div>
               <div class="h-6 w-px bg-slate-800"></div>
               <div>
                 <span class="text-slate-500 uppercase text-[10px] block font-mono">Estimated Remaining</span>
-                <span class="text-xl font-bold text-blue-400 font-mono" x-text="telemetry.capacity_left + ' Sites'">28 Sites</span>
+                <span class="text-xl font-bold text-blue-400 font-mono" x-text="currentCamData.capacity_left + ' Sites'">28 Sites</span>
               </div>
               <div class="h-6 w-px bg-slate-800"></div>
               <div>
@@ -676,6 +710,121 @@
 
       </div>
 
+
+      <!-- ======================================================== -->
+      <!-- VIEW 4: SETTINGS & CALIBRATION (SYSTEM CONTROL) -->
+      <!-- ======================================================== -->
+      <div x-show="activeTab === 'settings'" x-cloak x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0 translate-y-1" class="space-y-6">
+        
+        <div>
+          <div class="text-xs font-bold uppercase tracking-wider text-blue-400">Engine Parameters & Hardware Calibration</div>
+          <div class="text-2xl font-bold text-white mt-1">System & Model Settings</div>
+          <p class="text-xs text-slate-400 mt-1 max-w-2xl">
+            Calibrate detection thresholds, parking row geometries, and download telemetry logs.
+          </p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          
+          <!-- Card 1: YOLO Engine & Model Status -->
+          <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div class="flex items-center gap-2.5">
+                <i data-lucide="cpu" class="w-4 h-4 text-blue-400"></i>
+                <span class="font-bold text-sm text-white">YOLO Detection Engine</span>
+              </div>
+              <span class="text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded">ONLINE</span>
+            </div>
+
+            <div class="space-y-3 text-xs">
+              <div class="flex items-center justify-between">
+                <span class="text-slate-400">Model Checkpoint:</span>
+                <span class="font-mono text-slate-200 font-semibold bg-slate-800 px-2 py-0.5 rounded">best.pt (6.5 MB)</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-slate-400">Confidence Threshold:</span>
+                <span class="font-mono text-blue-400 font-bold">0.15 (Default)</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-slate-400">Input Image Resolution:</span>
+                <span class="font-mono text-slate-200">640 x 640 px</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-slate-400">Inference Stride:</span>
+                <span class="font-mono text-slate-200">Every 2 frames</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-slate-400">Anchor Ground Point:</span>
+                <span class="font-mono text-slate-200">Bottom-Center ((x1+x2)/2, y2)</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card 2: Parking Geometry & Calibration -->
+          <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div class="flex items-center gap-2.5">
+                <i data-lucide="ruler" class="w-4 h-4 text-blue-400"></i>
+                <span class="font-bold text-sm text-white">Parking Row Geometry (video_configs.json)</span>
+              </div>
+              <span class="text-[10px] font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded">3 ROWS</span>
+            </div>
+
+            <div class="space-y-3 text-xs">
+              <div class="flex items-center justify-between">
+                <span class="text-slate-400">BARIS_ATAS Pitch Ratio:</span>
+                <span class="font-mono text-slate-200 font-semibold">0.132 (13.2% Frame Width)</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-slate-400">BARIS_TENGAH Pitch Ratio:</span>
+                <span class="font-mono text-slate-200 font-semibold">0.165 (16.5% Frame Width)</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-slate-400">BARIS_BAWAH Pitch Ratio:</span>
+                <span class="font-mono text-slate-200 font-semibold">0.146 (14.6% Frame Width)</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-slate-400">Gap Capacity Formula:</span>
+                <span class="font-mono text-blue-400 text-[11px]">floor(dist / pitch + 0.10) - 1</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Card 3: Data Export & Integration -->
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4">
+          <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+            <div class="flex items-center gap-2.5">
+              <i data-lucide="download" class="w-4 h-4 text-emerald-400"></i>
+              <span class="font-bold text-sm text-white">Data Export & Telemetry Sync</span>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap items-center justify-between gap-4 text-xs">
+            <p class="text-slate-400 max-w-xl">
+              Export current detection telemetry and zone occupancy reports for offline audit, academic evaluation, or integration with external parking ticketing gates.
+            </p>
+            <div class="flex items-center gap-3">
+              <a 
+                href="/api/export/json" 
+                class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2 transition shadow-md shadow-blue-600/20">
+                <i data-lucide="file-json" class="w-4 h-4"></i>
+                Export Telemetry (JSON)
+              </a>
+              <a 
+                href="/api/config" 
+                target="_blank"
+                class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg font-medium flex items-center gap-2 transition border border-slate-700">
+                <i data-lucide="code" class="w-4 h-4"></i>
+                View Config Raw API
+              </a>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
     </main>
   </div>
 
@@ -685,6 +834,7 @@
       return {
         activeTab: 'overview',
         overlayActive: true,
+        monitoringMesh: true,
         activeCam: 'cam_01',
         selectedSector: 'all',
         threshold: 85,

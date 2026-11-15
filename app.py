@@ -6,6 +6,7 @@ Runs with zero build steps, serving the MotoSpace telemetry interface and video 
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from flask import Flask, jsonify, render_template, send_from_directory
@@ -110,6 +111,25 @@ def get_telemetry():
         },
     }
     return jsonify(telemetry)
+
+
+@app.route("/api/config")
+def get_config():
+    """Return video_configs.json profiles."""
+    config_path = ROOT / "video_configs.json"
+    if config_path.exists():
+        with open(config_path, "r", encoding="utf-8") as f:
+            return jsonify(json.load(f))
+    return jsonify({"error": "video_configs.json not found"}), 404
+
+
+@app.route("/api/export/json")
+def export_json():
+    """Export current telemetry as a downloadable JSON file."""
+    data = get_telemetry().get_json()
+    response = jsonify(data)
+    response.headers["Content-Disposition"] = "attachment; filename=motospace_telemetry_export.json"
+    return response
 
 
 @app.route("/outputs/<path:filename>")
