@@ -20,8 +20,10 @@ import math
 import shutil
 import subprocess
 import tempfile
-from dataclasses import dataclass
+from collections import deque
+from dataclasses import dataclass, field, replace
 from pathlib import Path
+from statistics import median
 from typing import Any, Iterable
 
 import cv2
@@ -41,6 +43,39 @@ class Detection:
     @property
     def bottom_center(self) -> tuple[float, float]:
         return ((self.x1 + self.x2) / 2.0, self.y2)
+
+
+@dataclass(frozen=True)
+class GapResult:
+    row_id: str
+    gap_type: str
+    start: tuple[float, float]
+    end: tuple[float, float]
+    distance: float
+    capacity: int
+
+
+@dataclass(frozen=True)
+class RowGeometry:
+    polygon: np.ndarray
+    axis: np.ndarray
+    boundary_start: np.ndarray
+    boundary_end: np.ndarray
+    start_projection: float
+    end_projection: float
+    length: float
+
+
+@dataclass
+class _TemporalGapState:
+    state_id: int
+    row_id: str
+    gap_type: str
+    first_seen: float
+    last_seen: float
+    latest_gap: GapResult
+    capacities: deque[int] = field(default_factory=deque)
+    confirmed: bool = False
 
 
 def parse_args() -> argparse.Namespace:
@@ -171,8 +206,222 @@ def scaled_polygon(points: list[list[float]], width: int, height: int) -> np.nda
     )
 
 
+def scaled_point(point: list[float], width: int, height: int) -> np.ndarray:
+    return np.array([point[0] * width, point[1] * height], dtype=np.float64)
+
+
 def point_in_polygon(point: tuple[float, float], polygon: np.ndarray) -> bool:
     return cv2.pointPolygonTest(polygon.astype(np.float32), point, False) >= 0
+
+
+def build_row_geometry(
+    row: dict[str, Any], width: int, height: int
+) -> RowGeometry:
+    row_id = str(row["id"])
+    polygon = scaled_polygon(row["polygon"], width, height)
+    axis = np.array(row.get("axis", [1.0, 0.0]), dtype=np.float64)
+    axis_norm = float(np.linalg.norm(axis))
+    if axis_norm <= 1e-9:
+        raise ValueError(f"Row '{row_id}': axis tidak boleh berupa vektor nol")
+    axis /= axis_norm
+
+    boundary_start = scaled_point(row["boundary_start"], width, height)
+    boundary_end = scaled_point(row["boundary_end"], width, height)
+    boundary_vector = boundary_end - boundary_start
+    if float(np.linalg.norm(boundary_vector)) <= 1e-9:
+        raise ValueError(
+            f"Row '{row_id}': boundary_start dan boundary_end tidak boleh sama"
+        )
+
+    signed_length = float(np.dot(boundary_vector, axis))
+    if abs(signed_length) <= 1e-9:
+        raise ValueError(
+            f"Row '{row_id}': boundary tidak memiliki panjang positif sepanjang axis"
+        )
+    if signed_length < 0:
+        axis = -axis
+        signed_length = -signed_length
+
+    start_projection = float(np.dot(boundary_start, axis))
+    return RowGeometry(
+        polygon=polygon,
+        axis=axis,
+        boundary_start=boundary_start,
+        boundary_end=boundary_end,
+        start_projection=start_projection,
+        end_projection=start_projection + signed_length,
+        length=signed_length,
+    )
+
+
+def detections_in_row(
+    detections: list[Detection], geometry: RowGeometry
+) -> list[Detection]:
+    members: list[Detection] = []
+    for detection in detections:
+        point = detection.bottom_center
+        if not point_in_polygon(point, geometry.polygon):
+            continue
+        projection = float(np.dot(np.array(point, dtype=np.float64), geometry.axis))
+        if geometry.start_projection <= projection <= geometry.end_projection:
+            members.append(detection)
+    return members
+
+
+class TemporalGapSmoother:
+    """Stabilkan hasil P3 berdasarkan durasi dan overlap geometri gap."""
+
+    def __init__(
+        self,
+        profile: dict[str, Any],
+        frame_width: int,
+        frame_height: int,
+    ) -> None:
+        config = profile.get("temporal_smoothing", {})
+        self.enabled = config.get("enabled") is True
+        self.activation_seconds = max(0.0, float(config.get("activation_seconds", 0.0)))
+        self.release_seconds = max(0.0, float(config.get("release_seconds", 0.0)))
+        self.match_overlap_threshold = float(
+            config.get("match_overlap_threshold", 0.5)
+        )
+        if not 0.0 <= self.match_overlap_threshold <= 1.0:
+            raise ValueError("match_overlap_threshold harus berada pada rentang 0-1")
+        self.capacity_window = max(1, int(config.get("capacity_window", 5)))
+        self._row_geometry: dict[str, tuple[RowGeometry, float]] = {}
+
+        if self.enabled:
+            for row in profile.get("rows", []):
+                row_id = str(row["id"])
+                geometry = build_row_geometry(row, frame_width, frame_height)
+                pitch_ratio = row.get(
+                    "reference_pitch", row.get("reference_pitch_width_ratio")
+                )
+                if pitch_ratio is None:
+                    raise KeyError(f"Row '{row_id}' tidak memiliki reference_pitch")
+                pitch_px = max(float(pitch_ratio) * frame_width, 1e-9)
+                self._row_geometry[row_id] = (geometry, pitch_px)
+
+        self.reset()
+
+    def reset(self) -> None:
+        self._states: dict[int, _TemporalGapState] = {}
+        self._next_state_id = 1
+        self._last_timestamp: float | None = None
+
+    def _interval(self, gap: GapResult) -> tuple[float, float, float]:
+        if gap.row_id not in self._row_geometry:
+            raise KeyError(f"Row temporal tidak dikenal: '{gap.row_id}'")
+        geometry, pitch_px = self._row_geometry[gap.row_id]
+        start = float(np.dot(np.array(gap.start), geometry.axis))
+        end = float(np.dot(np.array(gap.end), geometry.axis))
+        return min(start, end), max(start, end), pitch_px
+
+    def _match_score(self, state: _TemporalGapState, gap: GapResult) -> float | None:
+        if state.row_id != gap.row_id or state.gap_type != gap.gap_type:
+            return None
+
+        old_start, old_end, pitch_px = self._interval(state.latest_gap)
+        new_start, new_end, _ = self._interval(gap)
+        intersection = max(0.0, min(old_end, new_end) - max(old_start, new_start))
+        union = max(old_end, new_end) - min(old_start, new_start)
+        overlap_ratio = intersection / union if union > 1e-9 else 1.0
+        if overlap_ratio >= self.match_overlap_threshold:
+            return 2.0 + overlap_ratio
+
+        old_center = (old_start + old_end) / 2.0
+        new_center = (new_start + new_end) / 2.0
+        normalized_center_distance = abs(new_center - old_center) / pitch_px
+        if normalized_center_distance <= 0.5:
+            return 1.0 - normalized_center_distance
+        return None
+
+    def _stable_capacity(self, state: _TemporalGapState) -> int:
+        values = sorted(max(0, value) for value in state.capacities)
+        if not values:
+            return 0
+        return max(0, math.floor(median(values)))
+
+    def _stable_results(self) -> list[GapResult]:
+        confirmed = [state for state in self._states.values() if state.confirmed]
+        confirmed.sort(
+            key=lambda state: (
+                state.row_id,
+                state.gap_type,
+                self._interval(state.latest_gap)[0],
+            )
+        )
+        return [
+            replace(state.latest_gap, capacity=self._stable_capacity(state))
+            for state in confirmed
+        ]
+
+    def update(
+        self, raw_gaps: list[GapResult], timestamp_seconds: float
+    ) -> list[GapResult]:
+        if not self.enabled:
+            return list(raw_gaps)
+        if not math.isfinite(timestamp_seconds) or timestamp_seconds < 0:
+            raise ValueError("timestamp_seconds harus bernilai terbatas dan tidak negatif")
+        if (
+            self._last_timestamp is not None
+            and timestamp_seconds < self._last_timestamp
+        ):
+            raise ValueError("timestamp_seconds tidak boleh bergerak mundur")
+        self._last_timestamp = timestamp_seconds
+
+        available_gaps = [gap for gap in raw_gaps if gap.capacity > 0]
+        possible_matches: list[tuple[float, int, int]] = []
+        for state_id, state in self._states.items():
+            for gap_index, gap in enumerate(available_gaps):
+                score = self._match_score(state, gap)
+                if score is not None:
+                    possible_matches.append((score, state_id, gap_index))
+
+        possible_matches.sort(key=lambda item: (-item[0], item[1], item[2]))
+        matched_states: set[int] = set()
+        matched_gaps: set[int] = set()
+        for _, state_id, gap_index in possible_matches:
+            if state_id in matched_states or gap_index in matched_gaps:
+                continue
+            state = self._states[state_id]
+            gap = available_gaps[gap_index]
+            state.last_seen = timestamp_seconds
+            state.latest_gap = gap
+            state.capacities.append(max(0, gap.capacity))
+            if timestamp_seconds - state.first_seen >= self.activation_seconds:
+                state.confirmed = True
+            matched_states.add(state_id)
+            matched_gaps.add(gap_index)
+
+        for gap_index, gap in enumerate(available_gaps):
+            if gap_index in matched_gaps:
+                continue
+            capacities: deque[int] = deque(maxlen=self.capacity_window)
+            capacities.append(max(0, gap.capacity))
+            state = _TemporalGapState(
+                state_id=self._next_state_id,
+                row_id=gap.row_id,
+                gap_type=gap.gap_type,
+                first_seen=timestamp_seconds,
+                last_seen=timestamp_seconds,
+                latest_gap=gap,
+                capacities=capacities,
+                confirmed=self.activation_seconds == 0.0,
+            )
+            self._states[state.state_id] = state
+            matched_states.add(state.state_id)
+            self._next_state_id += 1
+
+        for state_id, state in list(self._states.items()):
+            if state_id in matched_states:
+                continue
+            if not state.confirmed:
+                del self._states[state_id]
+                continue
+            if timestamp_seconds - state.last_seen > self.release_seconds:
+                del self._states[state_id]
+
+        return self._stable_results()
 
 
 def put_label(
@@ -212,55 +461,188 @@ def draw_detection(frame: np.ndarray, detection: Detection) -> None:
     put_label(frame, f"Motor {detection.confidence:.2f}", (x1, max(18, y1)), blue, 0.46)
 
 
-def estimate_and_draw_gaps(
-    frame: np.ndarray,
+def calculate_gaps(
     detections: list[Detection],
     profile: dict[str, Any],
-) -> tuple[int, int, dict[str, int]]:
-    height, width = frame.shape[:2]
-    total_capacity = 0
-    total_candidates = 0
+    frame_width: int,
+    frame_height: int,
+) -> tuple[list[GapResult], dict[str, int]]:
+    """Hitung gap tanpa menggambar agar geometri dapat diuji secara terpisah."""
+    width = frame_width
+    height = frame_height
+    gaps: list[GapResult] = []
     row_counts: dict[str, int] = {}
     tolerance = float(profile.get("gap_tolerance", 0.10))
 
     for row in profile.get("rows", []):
         row_id = str(row["id"])
-        polygon = scaled_polygon(row["polygon"], width, height)
-        cv2.polylines(frame, [polygon], True, (255, 200, 0), 2)
-        label_at = tuple(int(v) for v in polygon[0])
-        put_label(frame, row_id, (label_at[0], max(20, label_at[1] + 18)), (255, 170, 0), 0.48)
-
-        members = [d for d in detections if point_in_polygon(d.bottom_center, polygon)]
+        geometry = build_row_geometry(row, width, height)
+        members = detections_in_row(detections, geometry)
         row_counts[row_id] = len(members)
 
-        axis = np.array(row.get("axis", [1.0, 0.0]), dtype=np.float64)
-        axis /= max(np.linalg.norm(axis), 1e-9)
-        members.sort(key=lambda d: float(np.dot(np.array(d.bottom_center), axis)))
-        pitch_px = float(row["reference_pitch_width_ratio"]) * width
+        members.sort(
+            key=lambda d: float(
+                np.dot(np.array(d.bottom_center), geometry.axis)
+            )
+        )
+        pitch_ratio = row.get("reference_pitch", row.get("reference_pitch_width_ratio"))
+        if pitch_ratio is None:
+            raise KeyError(f"Row '{row_id}' tidak memiliki reference_pitch")
+        pitch_px = float(pitch_ratio) * width
+        pitch_px = max(pitch_px, 1e-9)
+        edge_margin = float(row.get("edge_margin_pitch", 0.5))
+        visibility = row.get("boundary_visibility", {})
+        start_visible = visibility.get("start") is True
+        end_visible = visibility.get("end") is True
+
+        if not members:
+            if start_visible and end_visible:
+                capacity = max(0, math.floor(geometry.length / pitch_px + tolerance))
+                gaps.append(
+                    GapResult(
+                        row_id,
+                        "empty_row",
+                        tuple(geometry.boundary_start),
+                        tuple(geometry.boundary_end),
+                        geometry.length,
+                        capacity,
+                    )
+                )
+            continue
+
+        first = np.array(members[0].bottom_center, dtype=np.float64)
+        if start_visible:
+            start_distance = max(
+                0.0, float(np.dot(first - geometry.boundary_start, geometry.axis))
+            )
+            start_capacity = max(
+                0, math.floor(start_distance / pitch_px + tolerance - edge_margin)
+            )
+            gaps.append(
+                GapResult(
+                    row_id,
+                    "edge_start",
+                    tuple(geometry.boundary_start),
+                    tuple(first),
+                    start_distance,
+                    start_capacity,
+                )
+            )
 
         for left, right in zip(members, members[1:]):
             p1 = np.array(left.bottom_center, dtype=np.float64)
             p2 = np.array(right.bottom_center, dtype=np.float64)
-            distance = abs(float(np.dot(p2 - p1, axis)))
-            capacity = max(0, math.floor(distance / max(pitch_px, 1e-9) + tolerance) - 1)
+            distance = abs(float(np.dot(p2 - p1, geometry.axis)))
+            capacity = max(0, math.floor(distance / pitch_px + tolerance) - 1)
+            gaps.append(
+                GapResult(
+                    row_id,
+                    "internal",
+                    tuple(p1),
+                    tuple(p2),
+                    distance,
+                    capacity,
+                )
+            )
 
-            a = tuple(np.round(p1).astype(int))
-            b = tuple(np.round(p2).astype(int))
-            midpoint = tuple(np.round((p1 + p2) / 2.0).astype(int))
-            if capacity > 0:
-                total_candidates += 1
-                total_capacity += capacity
-                cv2.line(frame, a, b, (35, 210, 70), 6, cv2.LINE_AA)
-                wording = f"Estimasi muat {capacity} motor"
-                put_label(frame, wording, (midpoint[0] - 65, midpoint[1] - 8), (25, 155, 50), 0.42)
-            elif profile.get("show_tight_gaps", False):
+        last = np.array(members[-1].bottom_center, dtype=np.float64)
+        if end_visible:
+            end_distance = max(
+                0.0, float(np.dot(geometry.boundary_end - last, geometry.axis))
+            )
+            end_capacity = max(
+                0, math.floor(end_distance / pitch_px + tolerance - edge_margin)
+            )
+            gaps.append(
+                GapResult(
+                    row_id,
+                    "edge_end",
+                    tuple(last),
+                    tuple(geometry.boundary_end),
+                    end_distance,
+                    end_capacity,
+                )
+            )
+
+    return gaps, row_counts
+
+
+def draw_gap_results(
+    frame: np.ndarray,
+    gaps: list[GapResult],
+    show_tight_gaps: bool = False,
+) -> None:
+    colors = {
+        "internal": (35, 210, 70),
+        "edge_start": (0, 165, 255),
+        "edge_end": (0, 165, 255),
+        "empty_row": (190, 70, 200),
+    }
+    label_colors = {
+        "internal": (25, 155, 50),
+        "edge_start": (0, 120, 220),
+        "edge_end": (0, 120, 220),
+        "empty_row": (145, 45, 160),
+    }
+
+    for gap in gaps:
+        a = tuple(np.round(gap.start).astype(int))
+        b = tuple(np.round(gap.end).astype(int))
+        if gap.capacity <= 0:
+            if show_tight_gaps and gap.gap_type == "internal":
                 cv2.line(frame, a, b, (120, 120, 120), 2, cv2.LINE_AA)
+            continue
 
+        midpoint = tuple(
+            np.round((np.array(gap.start) + np.array(gap.end)) / 2.0).astype(int)
+        )
+        color = colors[gap.gap_type]
+        cv2.line(frame, a, b, color, 6, cv2.LINE_AA)
+        wording = f"{gap.gap_type}: muat {gap.capacity} motor"
+        put_label(
+            frame,
+            wording,
+            (midpoint[0] - 65, midpoint[1] - 8),
+            label_colors[gap.gap_type],
+            0.42,
+        )
+
+
+def estimate_and_draw_gaps(
+    frame: np.ndarray,
+    detections: list[Detection],
+    profile: dict[str, Any],
+    smoother: TemporalGapSmoother | None = None,
+    timestamp_seconds: float = 0.0,
+) -> tuple[int, int, dict[str, int]]:
+    height, width = frame.shape[:2]
+    raw_gaps, row_counts = calculate_gaps(detections, profile, width, height)
+    gaps = (
+        smoother.update(raw_gaps, timestamp_seconds)
+        if smoother is not None
+        else raw_gaps
+    )
+
+    for row in profile.get("rows", []):
+        geometry = build_row_geometry(row, width, height)
+        cv2.polylines(frame, [geometry.polygon], True, (255, 200, 0), 2)
+        label_at = tuple(int(v) for v in geometry.polygon[0])
+        put_label(
+            frame,
+            str(row["id"]),
+            (label_at[0], max(20, label_at[1] + 18)),
+            (255, 170, 0),
+            0.48,
+        )
+
+        members = detections_in_row(detections, geometry)
         for detection in members:
             point = tuple(np.round(detection.bottom_center).astype(int))
             cv2.circle(frame, point, 5, (0, 230, 255), -1, cv2.LINE_AA)
 
-    return total_candidates, total_capacity, row_counts
+    draw_gap_results(frame, gaps, bool(profile.get("show_tight_gaps", False)))
+    positive_gaps = [gap for gap in gaps if gap.capacity > 0]
+    return len(positive_gaps), sum(gap.capacity for gap in positive_gaps), row_counts
 
 
 def draw_dashboard(
@@ -284,7 +666,13 @@ def draw_dashboard(
     ]
     if profile.get("mode") == "gap":
         lines.append(f"Kandidat gap: {candidates} | estimasi kapasitas tambahan: {capacity}")
-        lines.append("Gap dihitung dari posisi motor; bukan kelas yang dideteksi YOLO")
+        smoothing_enabled = (
+            profile.get("temporal_smoothing", {}).get("enabled") is True
+        )
+        if smoothing_enabled:
+            lines.append("Temporal smoothing: aktif")
+        else:
+            lines.append("Gap dihitung dari posisi motor; bukan kelas yang dideteksi YOLO")
     else:
         lines.append("Mode deteksi saja: estimasi gap dinonaktifkan pada POV sangat jauh/padat")
         lines.append("Beberapa bounding box dapat mewakili beberapa motor; jumlah belum reliabel")
@@ -363,6 +751,10 @@ def process_video(args: argparse.Namespace) -> None:
     height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
     frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
 
+    gap_smoother: TemporalGapSmoother | None = None
+    if profile.get("mode") == "gap":
+        gap_smoother = TemporalGapSmoother(profile, width, height)
+
     model = YOLO(str(model_path))
     with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False, dir=output_path.parent) as tmp:
         temporary_video = Path(tmp.name)
@@ -397,7 +789,11 @@ def process_video(args: argparse.Namespace) -> None:
             candidates = capacity = 0
             if profile.get("mode") == "gap":
                 candidates, capacity, _ = estimate_and_draw_gaps(
-                    annotated, latest_detections, profile
+                    annotated,
+                    latest_detections,
+                    profile,
+                    smoother=gap_smoother,
+                    timestamp_seconds=frame_index / max(fps, 1e-9),
                 )
 
             draw_dashboard(
