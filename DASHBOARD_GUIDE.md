@@ -59,22 +59,12 @@ Buka URL tersebut di browser HP yang terhubung ke jaringan Wi-Fi yang sama untuk
 
 ---
 
-### Layar 3: Live Monitoring (Cinema Operator Feed)
-*Tujuan: Menunjukkan antarmuka khusus operator pengawas / pos satpam.*
-
-1. **Tunjukkan Mode Full Cinema:**
-   - Layar lebar dengan rasio 16:9 yang menampilkan status koneksi **`1080p WebRTC`** dan frame rate real-time (**24 FPS**).
-2. **Demonstrasikan Toggle `AI Mesh Overlay`:**
-   - Hilangkan centang pada checkbox **AI Mesh Overlay** untuk melihat video sensor mentah.
-   - Centang kembali untuk mengaktifkan grid deteksi klasifikasi (*Usable Vacant*, *Parked Bikes*, *Restricted Area*).
-
----
-
-### Layar 4: Settings & Calibration (Konfigurasi Sistem)
+### Layar 3: Settings & Calibration (Konfigurasi Sistem)
 *Tujuan: Membuktikan bahwa aplikasi ini terhubung ke parameter model riil, bukan angka hardcoded.*
 
 1. **Tunjukkan Parameter YOLO:**
    - Model `best.pt` (6.5 MB), confidence threshold `0.15`, frame stride `2`, dan metode koordinat tumpu `bottom-center`.
+   - Parameter P3 (Row Boundary Gaps) dan P4 (Temporal Gap Smoothing).
 2. **Tunjukkan Kalibrasi Baris (`video_configs.json`):**
    - Tunjukkan rasio lebar baris: `BARIS_ATAS` (0.132), `BARIS_TENGAH` (0.165), `BARIS_BAWAH` (0.146) serta formula matematis kapasitas:
      $$\text{capacity} = \max\left(0, \lfloor \frac{\text{distance}}{\text{pitch}} + 0.10 \rfloor - 1\right)$$
