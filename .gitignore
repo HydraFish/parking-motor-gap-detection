@@ -9,6 +9,10 @@ venv/
 *.avi
 *.mov
 outputs/
+outputs/campus_baseline/
+
+# Raw campus media and baseline artifacts
+data/
 
 # Design references and external skills
 design-ref/
