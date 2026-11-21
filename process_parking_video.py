@@ -796,16 +796,17 @@ def process_video(args: argparse.Namespace) -> None:
                     timestamp_seconds=frame_index / max(fps, 1e-9),
                 )
 
-            draw_dashboard(
-                annotated,
-                profile_name,
-                profile,
-                len(latest_detections),
-                candidates,
-                capacity,
-                frame_index,
-                fps,
-            )
+            if profile.get("show_dashboard", False):
+                draw_dashboard(
+                    annotated,
+                    profile_name,
+                    profile,
+                    len(latest_detections),
+                    candidates,
+                    capacity,
+                    frame_index,
+                    fps,
+                )
             writer.write(annotated)
 
             if args.preview:

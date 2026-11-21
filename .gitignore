@@ -14,6 +14,9 @@ outputs/campus_baseline/
 # Raw campus media and baseline artifacts
 data/
 
+# Local dataset preparation utility
+prepare_campus_dataset.py
+
 # Design references and external skills
 design-ref/
 andrej-karpathy-skills-main/

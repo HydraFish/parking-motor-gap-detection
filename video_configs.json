@@ -103,6 +103,249 @@
           "reference_pitch": 0.146
         }
       ]
+    },
+    "campus_overhead_same_camera": {
+      "match": [
+        "VID20261116151825",
+        "VID20261116151910",
+        "VID20261116151945"
+      ],
+      "mode": "gap",
+      "conf": 0.20,
+      "imgsz": 960,
+      "inference_stride": 5,
+      "gap_tolerance": 0.10,
+      "show_tight_gaps": false,
+      "show_dashboard": false,
+      "temporal_smoothing": {
+        "enabled": true,
+        "activation_seconds": 1.5,
+        "release_seconds": 0.75,
+        "match_overlap_threshold": 0.5,
+        "capacity_window": 5
+      },
+      "sliced_inference": {
+        "enabled": false
+      },
+      "rows": [
+        {
+          "id": "KAMPUS_ATAS",
+          "polygon": [
+            [0.0, 0.30],
+            [1.0, 0.30],
+            [1.0, 0.46],
+            [0.0, 0.45]
+          ],
+          "axis": [1.0, 0.0],
+          "boundary_start": [0.0, 0.42],
+          "boundary_end": [1.0, 0.43],
+          "boundary_visibility": {
+            "start": false,
+            "end": false
+          },
+          "edge_margin_pitch": 0.5,
+          "reference_pitch": 0.043
+        },
+        {
+          "id": "KAMPUS_TENGAH",
+          "polygon": [
+            [0.10, 0.49],
+            [0.82, 0.49],
+            [0.82, 0.68],
+            [0.10, 0.68]
+          ],
+          "axis": [1.0, 0.0],
+          "boundary_start": [0.10, 0.625],
+          "boundary_end": [0.82, 0.625],
+          "boundary_visibility": {
+            "start": false,
+            "end": false
+          },
+          "edge_margin_pitch": 0.5,
+          "reference_pitch": 0.052
+        },
+        {
+          "id": "KAMPUS_BAWAH",
+          "polygon": [
+            [0.0, 0.70],
+            [0.89, 0.70],
+            [0.89, 0.93],
+            [0.0, 0.93]
+          ],
+          "axis": [1.0, 0.0],
+          "boundary_start": [0.0, 0.85],
+          "boundary_end": [0.89, 0.85],
+          "boundary_visibility": {
+            "start": false,
+            "end": false
+          },
+          "edge_margin_pitch": 0.5,
+          "reference_pitch": 0.040
+        }
+      ]
+    },
+    "campus_zoomed_lower": {
+      "match": [
+        "VID_20261116_152058",
+        "VID20261116152012"
+      ],
+      "mode": "gap",
+      "conf": 0.20,
+      "imgsz": 960,
+      "inference_stride": 10,
+      "gap_tolerance": 0.10,
+      "show_tight_gaps": false,
+      "show_dashboard": false,
+      "temporal_smoothing": {
+        "enabled": true,
+        "activation_seconds": 1.5,
+        "release_seconds": 0.75,
+        "match_overlap_threshold": 0.5,
+        "capacity_window": 5
+      },
+      "sliced_inference": {
+        "enabled": false
+      },
+      "rows": [
+        {
+          "id": "KAMPUS_ATAS",
+          "polygon": [[0.0, 0.18], [1.0, 0.18], [1.0, 0.31], [0.0, 0.31]],
+          "axis": [1.0, 0.0],
+          "boundary_start": [0.0, 0.26],
+          "boundary_end": [1.0, 0.26],
+          "boundary_visibility": {"start": false, "end": false},
+          "edge_margin_pitch": 0.5,
+          "reference_pitch": 0.065
+        },
+        {
+          "id": "KAMPUS_TENGAH",
+          "polygon": [[0.0, 0.55], [1.0, 0.55], [1.0, 0.70], [0.0, 0.70]],
+          "axis": [1.0, 0.0],
+          "boundary_start": [0.0, 0.64],
+          "boundary_end": [1.0, 0.64],
+          "boundary_visibility": {"start": false, "end": false},
+          "edge_margin_pitch": 0.5,
+          "reference_pitch": 0.080
+        },
+        {
+          "id": "KAMPUS_BAWAH",
+          "polygon": [[0.0, 0.90], [1.0, 0.90], [1.0, 1.0], [0.0, 1.0]],
+          "axis": [1.0, 0.0],
+          "boundary_start": [0.0, 0.98],
+          "boundary_end": [1.0, 0.98],
+          "boundary_visibility": {"start": false, "end": false},
+          "edge_margin_pitch": 0.5,
+          "reference_pitch": 0.060
+        }
+      ]
+    },
+    "campus_zoomed_upper": {
+      "match": [
+        "VID_20261116_152136"
+      ],
+      "mode": "gap",
+      "conf": 0.20,
+      "imgsz": 960,
+      "inference_stride": 10,
+      "gap_tolerance": 0.10,
+      "show_tight_gaps": false,
+      "show_dashboard": false,
+      "temporal_smoothing": {
+        "enabled": true,
+        "activation_seconds": 1.5,
+        "release_seconds": 0.75,
+        "match_overlap_threshold": 0.5,
+        "capacity_window": 5
+      },
+      "sliced_inference": {
+        "enabled": false
+      },
+      "rows": [
+        {
+          "id": "KAMPUS_ATAS",
+          "polygon": [[0.0, 0.12], [1.0, 0.12], [1.0, 0.24], [0.0, 0.24]],
+          "axis": [1.0, 0.0],
+          "boundary_start": [0.0, 0.19],
+          "boundary_end": [1.0, 0.19],
+          "boundary_visibility": {"start": false, "end": false},
+          "edge_margin_pitch": 0.5,
+          "reference_pitch": 0.070
+        },
+        {
+          "id": "KAMPUS_TENGAH",
+          "polygon": [[0.0, 0.48], [1.0, 0.48], [1.0, 0.66], [0.0, 0.66]],
+          "axis": [1.0, 0.0],
+          "boundary_start": [0.0, 0.58],
+          "boundary_end": [1.0, 0.58],
+          "boundary_visibility": {"start": false, "end": false},
+          "edge_margin_pitch": 0.5,
+          "reference_pitch": 0.080
+        },
+        {
+          "id": "KAMPUS_BAWAH",
+          "polygon": [[0.0, 0.90], [1.0, 0.90], [1.0, 1.0], [0.0, 1.0]],
+          "axis": [1.0, 0.0],
+          "boundary_start": [0.0, 0.98],
+          "boundary_end": [1.0, 0.98],
+          "boundary_visibility": {"start": false, "end": false},
+          "edge_margin_pitch": 0.5,
+          "reference_pitch": 0.060
+        }
+      ]
+    },
+    "campus_wide_shifted": {
+      "match": [
+        "VID20261116152047"
+      ],
+      "mode": "gap",
+      "conf": 0.20,
+      "imgsz": 960,
+      "inference_stride": 5,
+      "gap_tolerance": 0.10,
+      "show_tight_gaps": false,
+      "show_dashboard": false,
+      "temporal_smoothing": {
+        "enabled": true,
+        "activation_seconds": 1.5,
+        "release_seconds": 0.75,
+        "match_overlap_threshold": 0.5,
+        "capacity_window": 5
+      },
+      "sliced_inference": {
+        "enabled": false
+      },
+      "rows": [
+        {
+          "id": "KAMPUS_ATAS",
+          "polygon": [[0.0, 0.12], [1.0, 0.12], [1.0, 0.34], [0.0, 0.34]],
+          "axis": [1.0, 0.0],
+          "boundary_start": [0.0, 0.28],
+          "boundary_end": [1.0, 0.29],
+          "boundary_visibility": {"start": false, "end": false},
+          "edge_margin_pitch": 0.5,
+          "reference_pitch": 0.045
+        },
+        {
+          "id": "KAMPUS_TENGAH",
+          "polygon": [[0.04, 0.34], [0.91, 0.34], [0.91, 0.59], [0.04, 0.59]],
+          "axis": [1.0, 0.0],
+          "boundary_start": [0.04, 0.53],
+          "boundary_end": [0.91, 0.53],
+          "boundary_visibility": {"start": false, "end": false},
+          "edge_margin_pitch": 0.5,
+          "reference_pitch": 0.055
+        },
+        {
+          "id": "KAMPUS_BAWAH",
+          "polygon": [[0.0, 0.65], [0.92, 0.65], [0.92, 0.97], [0.0, 0.97]],
+          "axis": [1.0, 0.0],
+          "boundary_start": [0.0, 0.90],
+          "boundary_end": [0.92, 0.90],
+          "boundary_visibility": {"start": false, "end": false},
+          "edge_margin_pitch": 0.5,
+          "reference_pitch": 0.055
+        }
+      ]
     }
   }
 }

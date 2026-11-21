@@ -152,3 +152,16 @@ Untuk laporan/demonstrasi dosen, gunakan Video 2 sebagai hasil utama dan Video 1
 ## Pernyataan yang aman saat demo
 
 > YOLO mendeteksi motor. Sistem kemudian mengambil bottom-center setiap bounding box, memasukkannya ke baris parkir, mengurutkannya sepanjang baris, lalu membandingkan jarak antarmotor dengan reference parking pitch. Karena belum ada ground truth kapasitas gap dan belum dikalibrasi dalam meter, hasil ini adalah qualitative proof of concept.
+
+# Dashboard pemrosesan video
+
+Dashboard Streamlit memungkinkan pengguna mengunggah video, menjalankan inference
+`best.pt`, melihat progres, memutar hasil, dan mengunduh video beranotasi. Jalankan:
+
+```powershell
+python -m streamlit run streamlit_app.py
+```
+
+Atau klik dua kali `run_dashboard.bat`. Gunakan mode `Otomatis` agar video demo
+yang memiliki profil ROI memakai deteksi gap yang sesuai. Video lain akan memakai
+profil default `detection_only`.

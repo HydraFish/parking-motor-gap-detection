@@ -1,11 +1,10 @@
 @echo off
-title MotoSpace CV Telemetry Dashboard
+title MotoSpace Video Processor
 echo ========================================================
-echo  Starting MotoSpace CV Telemetry Dashboard...
+echo  Starting MotoSpace Streamlit Dashboard...
 echo ========================================================
 echo.
-echo URL: http://localhost:8000
+echo Browser akan dibuka otomatis.
 echo.
-start http://localhost:8000
-python app.py
+python -m streamlit run streamlit_app.py
 pause
